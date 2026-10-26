@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TreadBridge – Web Flasher</title>
+<meta name="description" content="Flash and configure TreadBridge on your ESP32-C6 directly from the browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%83%3C/text%3E%3C/svg%3E">
+<style>
+/* Same design tokens as the TreadBridge web interface on the device */
+:root{--bg:#080A0E;--card:#1C2028;--card2:#252A34;--fg:#EBEEF2;--dim:#828A96;--acc:#00C88C;--ok:#3CD26E;--warn:#F0BE28;--bad:#DC4646;--off:#3C4048;--line:#323842}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0 auto;max-width:760px;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:12px 12px 84px}
+h1{font-size:1.1rem;margin:2px 0 10px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h1 small{font-size:.75rem;color:var(--dim);font-weight:400;text-align:right}
+h2{font-size:1rem;margin:0 0 6px}
+a{color:var(--acc)}
+.page{display:none}.page.on{display:block}
+.card{background:var(--card);border-radius:14px;padding:12px;margin-bottom:10px}
+.lbl{font-size:.7rem;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.big{font-size:1.15rem;font-weight:600;word-break:break-word}
+.sub{font-size:.8rem;color:var(--dim)}
+.hint{font-size:.78rem;color:var(--dim);margin:6px 0}
+.ind{display:flex;align-items:center;gap:10px}
+.dot{width:14px;height:14px;border-radius:50%;background:var(--off);flex:none}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--acc);color:#04130d;font-size:.78rem;font-weight:700;margin-right:8px}
+button,.b{font:inherit;font-weight:600;border:0;border-radius:10px;padding:10px 14px;background:var(--acc);color:#04130d;cursor:pointer;text-decoration:none;display:inline-block}
+button.s,.b.s{background:var(--card2);color:var(--fg)}
+button.r{background:var(--bad);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+label{display:block;font-size:.8rem;color:var(--dim);margin:10px 0 3px}
+input[type=text],input[type=password],select{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+input:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px}
+.chk{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--fg);font-size:.9rem}
+.chk input{width:18px;height:18px;accent-color:var(--acc)}
+.warnbox{border-left:4px solid var(--warn)}
+.badbox{border-left:4px solid var(--bad)}
+.okbox{border-left:4px solid var(--ok)}
+ol{margin:6px 0 0;padding-left:20px}ol li{margin:5px 0}
+code{background:var(--bg);border-radius:6px;padding:1px 6px;font-size:.85em}
+#term{background:#05070a;border-radius:10px;padding:8px 10px;font:12px/1.5 ui-monospace,Consolas,monospace;height:160px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:10px;color:var(--dim)}
+#term .ok{color:var(--ok)}#term .bad{color:var(--bad)}#term .warn{color:var(--warn)}
+#nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+#nav button{flex:1;border-radius:0;background:transparent;color:var(--fg);padding:16px 4px;font-size:.9rem}
+#nav button.on{background:var(--acc);color:#04130d}
+#lang{width:auto;padding:3px 8px;font-size:.75rem;border-radius:8px}
+.hide{display:none!important}
+esp-web-install-button:not(:defined) span[slot]{display:none}
+esp-web-install-button{--esp-tools-button-color:#00C88C;--esp-tools-button-text-color:#04130d}
+</style>
+</head>
+<body>
+
+<h1><span>TreadBridge <span style="color:var(--dim);font-weight:400">· Web Flasher</span></span>
+  <small><select id="lang"><option value="en">English</option><option value="de">Deutsch</option></select> <span id="ver"></span></small></h1>
+
+<!-- ============ PAGE: SETUP (settings + flash + apply) ============ -->
+<div class="page on" id="p-flash">
+
+  <div class="card badbox hide" id="noSerial">
+    <div class="big" data-i="nosupport_t"></div>
+    <div class="hint" data-i="nosupport"></div>
+  </div>
+
+  <div class="card warnbox hide" id="noFw">
+    <div class="big" data-i="nofw_t"></div>
+    <div class="hint" data-i="nofw"></div>
+  </div>
+
+  <div class="card">
+    <div class="ind"><span class="step">1</span><div><div class="big" data-i="st1_t"></div><div class="sub" data-i="st1_s"></div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="lbl" data-i="l_lang"></div>
+    <label for="lang2" data-i="l_lang2"></label>
+    <select id="lang2"><option value="1">English</option><option value="0">Deutsch</option></select>
+  </div>
+
+  <div class="card">
+    <div class="lbl" data-i="l_prof"></div>
+    <label for="pn1" data-i="l_pn1"></label><input type="text" id="pn1" maxlength="8" autocomplete="off" value="Person 1">
+    <label for="pn2" data-i="l_pn2"></label><input type="text" id="pn2" maxlength="8" autocomplete="off" value="Person 2">
+    <label for="fpbase" data-i="l_fpbase"></label><input type="text" id="fpbase" maxlength="14" autocomplete="off" value="TreadBridge">
+    <div class="hint"><span data-i="l_fpname"></span> <b id="fpFull"></b></div>
+  </div>
+
+  <div class="card">
+    <div class="lbl" data-i="l_wlan"></div>
+    <label for="wssid" data-i="l_ssid"></label><input type="text" id="wssid" maxlength="32" autocomplete="off">
+    <label for="wpass" data-i="l_pass"></label><input type="password" id="wpass" maxlength="63" autocomplete="new-password">
+    <label for="host" data-i="l_host"></label><input type="text" id="host" maxlength="24" autocomplete="off" value="treadbridge">
+    <div class="hint" data-i="l_wlan_hint"></div>
+  </div>
+
+  <div class="card">
+    <div class="lbl" data-i="l_ap"></div>
+    <label for="apssid" data-i="l_ssid"></label><input type="text" id="apssid" maxlength="32" autocomplete="off" value="TreadBridge">
+    <label for="appass" data-i="l_appass"></label><input type="password" id="appass" maxlength="63" autocomplete="new-password">
+    <label class="chk"><input type="checkbox" id="forceap"> <span data-i="l_forceap"></span></label>
+  </div>
+
+  <div class="card">
+    <div class="ind"><span class="step">2</span><div><div class="big" data-i="st2_t"></div><div class="sub" data-i="st2_s"></div></div></div>
+    <ol>
+      <li data-i="f1_a"></li>
+      <li data-i="f1_b"></li>
+    </ol>
+    <label class="chk"><input type="checkbox" id="autoApply" checked> <span data-i="st2_auto"></span></label>
+    <div class="btns">
+      <esp-web-install-button manifest="manifest.json">
+        <button slot="activate" data-i="f1_btn"></button>
+        <span slot="unsupported" data-i="nosupport_t"></span>
+        <span slot="not-allowed" data-i="f1_https"></span>
+      </esp-web-install-button>
+    </div>
+    <div class="hint" data-i="f1_note"></div>
+  </div>
+
+  <div class="card">
+    <div class="ind"><span class="step">3</span><div><div class="big" data-i="st3_t"></div><div class="sub" data-i="st3_s"></div></div></div>
+    <div class="ind" style="margin-top:10px"><div class="dot" id="dDev"></div><div><div class="big" id="devTxt"></div><div class="sub" id="devSub"></div></div></div>
+    <div class="btns">
+      <button id="bApply" data-i="s_apply_now"></button>
+      <button class="s" id="bConnect" data-i="s_connect"></button>
+      <button class="s" id="bRead" disabled data-i="s_read"></button>
+      <button class="s" id="bClose" disabled data-i="s_close"></button>
+    </div>
+    <div class="hint" data-i="s_apply_hint"></div>
+    <div id="term" aria-live="polite"></div>
+  </div>
+
+  <div class="card">
+    <div class="lbl" data-i="after_t"></div>
+    <ol>
+      <li data-i="after_1"></li>
+      <li data-i="after_2"></li>
+      <li data-i="after_3"></li>
+    </ol>
+  </div>
+</div>
+
+<!-- ============ PAGE: GUIDE ============ -->
+<div class="page" id="p-guide">
+  <div class="card">
+    <div class="lbl" data-i="g_t"></div>
+    <ol>
+      <li data-i="g_1"></li><li data-i="g_2"></li><li data-i="g_3"></li><li data-i="g_4"></li><li data-i="g_5"></li>
+    </ol>
+  </div>
+  <div class="card">
+    <div class="lbl" data-i="g_trouble"></div>
+    <ol>
+      <li data-i="g_t1"></li><li data-i="g_t2"></li><li data-i="g_t3"></li>
+    </ol>
+  </div>
+  <div class="card">
+    <div class="lbl" data-i="g_links"></div>
+    <div class="btns">
+      <a class="b s" href="https://github.com/Kashiyyy/TreadBridge" target="_blank" rel="noopener">GitHub</a>
+      <a class="b s" href="https://github.com/Kashiyyy/TreadBridge#readme" target="_blank" rel="noopener">README</a>
+    </div>
+  </div>
+</div>
+
+<div id="nav">
+  <button data-t="flash" class="on" data-i="n_flash"></button>
+  <button data-t="guide" data-i="n_guide"></button>
+</div>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+
+/* ------------------------------------------------------------------ i18n */
+const I = {
+en:{
+ n_flash:'Setup',n_guide:'Guide',
+ st1_t:'Your settings',st1_s:'Optional – everything can also be changed later',
+ st2_t:'Install the firmware',st2_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
+ st2_auto:'Send my settings to the device right after installing',
+ st3_t:'Apply settings',st3_s:'Runs automatically after installing. Use these buttons to change settings later or if it did not start.',
+ s_apply_now:'Send settings to device',t_wait:'Installation finished – waiting for the device to restart …',t_auto_fail:'Could not reach the device automatically. Click “Send settings to device” and pick the port.',t_auto_start:'Sending your settings …',
+ nosupport_t:'Browser not supported',
+ nosupport:'Flashing needs the Web Serial API. Use Google Chrome, Microsoft Edge or Opera on a desktop computer (Windows, macOS, Linux or ChromeOS). Firefox, Safari and mobile browsers do not support it.',
+ nofw_t:'Firmware not published yet',
+ nofw:'The firmware files were not found next to this page. They are built automatically by the GitHub Action – wait until it has finished (Actions tab of the repository) and reload this page.',
+ f1_t:'Install the firmware',f1_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
+ f1_a:'Connect the board with a USB-C cable that can transfer data.',
+ f1_b:'Click the button below and choose the serial port of the board (usually “USB JTAG/serial debug unit” or “USB Serial”).',
+ f1_btn:'Install TreadBridge',
+ f1_https:'This page must be opened over https:// or from localhost.',
+ f1_note:'Your saved settings and the saved treadmill are kept when you update. If the port does not show up: hold BOOT, tap RESET, release BOOT and try again.',
+ f2_t:'Configure (optional)',f2_s:'Name, WLAN, language – no coding, no config file',
+ f2_btn:'Go to settings',
+ after_t:'After flashing',
+ after_1:'The display asks “Who is running?” – tap your name.',
+ after_2:'Open http://treadbridge.local (or the IP address shown on the SYS page) on a phone or PC in the same WLAN.',
+ after_3:'Without WLAN settings the device opens its own WLAN “TreadBridge” (password treadbridge123) → http://192.168.4.1.',
+ s_connect:'Connect to device',s_read:'Read from device',s_close:'Disconnect',
+ s_conn_hint:'The device must already run the TreadBridge firmware and be connected via USB.',
+ s_apply:'Save to device',
+ s_apply_hint:'The device saves the values and restarts. Empty password fields leave the stored passwords unchanged.',
+ d_none:'Not connected',d_none_s:'Click “Connect to device”.',
+ d_ok:'Connected',d_busy:'Connecting …',d_fail:'No answer from the device',
+ d_fail_s:'Is the TreadBridge firmware installed? Install it first (step 2).',
+ l_lang:'Language',l_lang2:'Language of display, web page and log',
+ l_prof:'Profiles and foot pod',l_pn1:'Name of profile 1 (max. 8 characters)',l_pn2:'Name of profile 2 (max. 8 characters)',
+ l_fpbase:'Foot pod name, prefix (max. 14 characters)',l_fpname:'The foot pod will be called:',
+ l_wlan:'WLAN',l_ssid:'Name (SSID)',l_pass:'Password (empty = unchanged)',l_host:'Hostname (reachable as hostname.local)',
+ l_wlan_hint:'2.4 GHz only. Leave the name empty to use only the device’s own WLAN.',
+ l_ap:'Own WLAN (fallback)',l_appass:'Password (min. 8 characters, empty = unchanged)',l_forceap:'Always use the own WLAN (no home WLAN)',
+ t_connecting:'Opening port …',t_ping:'Checking firmware …',t_pong:'TreadBridge firmware %s found.',
+ t_nopong:'No answer. Press RESET on the board and try again.',
+ t_read:'Reading settings …',t_readok:'Settings loaded.',
+ t_send:'Sending settings …',t_ok:'Saved. The device restarts now – choose your profile on the display.',
+ t_ok2:'Saved (no restart needed).',t_err:'The device rejected the settings: ',
+ t_closed:'Port closed.',t_lost:'Connection closed (the device restarted).',t_cancel:'No port selected.',
+ v_pn:'Profile names need 1 to 8 characters.',v_fp:'Foot pod name needs 1 to 14 characters.',
+ v_host:'Hostname: only a-z, 0-9 and hyphen (max. 24).',v_ap:'Own WLAN: name 1–32 characters, password empty or at least 8.',
+ g_t:'Quick start',g_1:'Fill in your settings (WLAN, names, language) – optional.',g_2:'Click “Install TreadBridge”. The settings are sent automatically afterwards.',
+ g_3:'On the display tap your profile name.',g_4:'Open the device’s web page and scan for devices, then connect your treadmill.',
+ g_5:'On the watch add a new foot pod sensor and pick “TreadBridge <profile>”.',
+ g_trouble:'Troubleshooting',
+ g_t1:'No port listed: use a data-capable USB cable, then hold BOOT, tap RESET, release BOOT.',
+ g_t2:'Settings page says “No answer”: close other programs that use the serial port (Arduino IDE, serial monitor, other browser tabs).',
+ g_t3:'Wrong WLAN data: connect to the WLAN “TreadBridge” (password treadbridge123), open http://192.168.4.1 and fix it on the Settings page.',
+ g_links:'More'},
+de:{
+ n_flash:'Einrichten',n_guide:'Anleitung',
+ st1_t:'Deine Einstellungen',st1_s:'Optional – alles lässt sich später auch ändern',
+ st2_t:'Firmware installieren',st2_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
+ st2_auto:'Meine Einstellungen direkt nach der Installation an das Gerät senden',
+ st3_t:'Einstellungen übertragen',st3_s:'Läuft nach der Installation automatisch. Mit diesen Knöpfen änderst du Einstellungen später oder startest es von Hand.',
+ s_apply_now:'Einstellungen an Gerät senden',t_wait:'Installation fertig – warte auf den Neustart des Geräts …',t_auto_fail:'Gerät nicht automatisch erreicht. Klicke auf „Einstellungen an Gerät senden“ und wähle den Port.',t_auto_start:'Sende deine Einstellungen …',
+ nosupport_t:'Browser nicht unterstützt',
+ nosupport:'Zum Flashen wird die Web-Serial-API benötigt. Nutze Google Chrome, Microsoft Edge oder Opera am Computer (Windows, macOS, Linux oder ChromeOS). Firefox, Safari und mobile Browser unterstützen sie nicht.',
+ nofw_t:'Firmware noch nicht veröffentlicht',
+ nofw:'Die Firmware-Dateien wurden neben dieser Seite nicht gefunden. Sie werden automatisch von der GitHub Action gebaut – warte, bis sie fertig ist (Reiter Actions im Repository), und lade die Seite neu.',
+ f1_t:'Firmware installieren',f1_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
+ f1_a:'Das Board mit einem USB-C-Kabel anschließen, das Daten überträgt.',
+ f1_b:'Unten auf den Knopf klicken und den seriellen Port des Boards wählen (meist „USB JTAG/serial debug unit“ oder „USB Serial“).',
+ f1_btn:'TreadBridge installieren',
+ f1_https:'Diese Seite muss über https:// oder von localhost geöffnet werden.',
+ f1_note:'Gespeicherte Einstellungen und das gespeicherte Laufband bleiben bei einem Update erhalten. Erscheint kein Port: BOOT halten, kurz RESET drücken, BOOT loslassen und erneut versuchen.',
+ f2_t:'Konfigurieren (optional)',f2_s:'Name, WLAN, Sprache – ohne Programmieren, ohne Config-Datei',
+ f2_btn:'Zu den Einstellungen',
+ after_t:'Nach dem Flashen',
+ after_1:'Das Display fragt „Wer läuft?“ – tippe deinen Namen an.',
+ after_2:'Öffne http://treadbridge.local (oder die IP-Adresse von der Seite SYS) am Handy oder PC im selben WLAN.',
+ after_3:'Ohne WLAN-Daten öffnet das Gerät sein eigenes WLAN „TreadBridge“ (Passwort treadbridge123) → http://192.168.4.1.',
+ s_connect:'Mit Gerät verbinden',s_read:'Vom Gerät lesen',s_close:'Trennen',
+ s_conn_hint:'Auf dem Gerät muss schon die TreadBridge-Firmware laufen, und es muss per USB verbunden sein.',
+ s_apply:'Auf Gerät speichern',
+ s_apply_hint:'Das Gerät speichert die Werte und startet neu. Leere Passwortfelder lassen die gespeicherten Passwörter unverändert.',
+ d_none:'Nicht verbunden',d_none_s:'Klicke auf „Mit Gerät verbinden“.',
+ d_ok:'Verbunden',d_busy:'Verbinde …',d_fail:'Keine Antwort vom Gerät',
+ d_fail_s:'Ist die TreadBridge-Firmware installiert? Zuerst installieren (Schritt 2).',
+ l_lang:'Sprache',l_lang2:'Sprache von Display, Webseite und Log',
+ l_prof:'Profile und Foot Pod',l_pn1:'Name Profil 1 (max. 8 Zeichen)',l_pn2:'Name Profil 2 (max. 8 Zeichen)',
+ l_fpbase:'Foot-Pod-Name, Vorsilbe (max. 14 Zeichen)',l_fpname:'Der Foot Pod heißt:',
+ l_wlan:'WLAN',l_ssid:'Name (SSID)',l_pass:'Passwort (leer = unverändert)',l_host:'Hostname (erreichbar als hostname.local)',
+ l_wlan_hint:'Nur 2,4 GHz. Name leer lassen, um nur das eigene WLAN des Geräts zu nutzen.',
+ l_ap:'Eigenes WLAN (Ausweichlösung)',l_appass:'Passwort (mind. 8 Zeichen, leer = unverändert)',l_forceap:'Immer das eigene WLAN nutzen (kein Heim-WLAN)',
+ t_connecting:'Öffne Port …',t_ping:'Prüfe Firmware …',t_pong:'TreadBridge-Firmware %s gefunden.',
+ t_nopong:'Keine Antwort. RESET am Board drücken und erneut versuchen.',
+ t_read:'Lese Einstellungen …',t_readok:'Einstellungen geladen.',
+ t_send:'Sende Einstellungen …',t_ok:'Gespeichert. Das Gerät startet neu – wähle dein Profil am Display.',
+ t_ok2:'Gespeichert (kein Neustart nötig).',t_err:'Das Gerät hat die Einstellungen abgelehnt: ',
+ t_closed:'Port geschlossen.',t_lost:'Verbindung beendet (das Gerät hat neu gestartet).',t_cancel:'Kein Port gewählt.',
+ v_pn:'Profilnamen brauchen 1 bis 8 Zeichen.',v_fp:'Foot-Pod-Name braucht 1 bis 14 Zeichen.',
+ v_host:'Hostname: nur a-z, 0-9 und Bindestrich (max. 24).',v_ap:'Eigenes WLAN: Name 1–32 Zeichen, Passwort leer oder mindestens 8.',
+ g_t:'Schnellstart',g_1:'Einstellungen ausfüllen (WLAN, Namen, Sprache) – optional.',g_2:'Auf „TreadBridge installieren“ klicken. Die Einstellungen werden danach automatisch übertragen.',
+ g_3:'Am Display deinen Profilnamen antippen.',g_4:'Die Webseite des Geräts öffnen, Geräte suchen und das Laufband verbinden.',
+ g_5:'An der Uhr einen neuen Foot-Pod-Sensor hinzufügen und „TreadBridge <Profil>“ wählen.',
+ g_trouble:'Fehlersuche',
+ g_t1:'Kein Port in der Liste: Datenkabel benutzen, dann BOOT halten, RESET drücken, BOOT loslassen.',
+ g_t2:'Einstellungen melden „Keine Antwort“: andere Programme schließen, die den Port nutzen (Arduino IDE, Serial Monitor, andere Browser-Tabs).',
+ g_t3:'WLAN-Daten falsch: mit dem WLAN „TreadBridge“ (Passwort treadbridge123) verbinden, http://192.168.4.1 öffnen und unter Einstellungen korrigieren.',
+ g_links:'Mehr'}
+};
+let LANG = 'en';   // English is the default; a language chosen by the visitor is remembered
+try{ if (localStorage.getItem('tb_lang') === 'de') LANG = 'de'; }catch(e){}
+const t = (k, ...a) => { let s = (I[LANG][k] ?? I.en[k] ?? k); a.forEach(v => s = s.replace('%s', v)); return s; };
+function applyLang(){
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-i]').forEach(e => e.textContent = t(e.dataset.i));
+  $('lang').value = LANG;
+  $('lang2').value = LANG === 'de' ? '0' : '1';   // preselect the device language to match the site language
+  renderDev();
+}
+$('lang').onchange = () => { LANG = $('lang').value; try{localStorage.setItem('tb_lang', LANG)}catch(e){}; applyLang(); };
+
+/* ------------------------------------------------------------ navigation */
+function show(x){
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === 'p-' + x));
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.t === x));
+  try{ history.replaceState(null, '', '#' + x) }catch(e){}
+}
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.t));
+
+/* ------------------------------------------------- environment / firmware */
+if (!('serial' in navigator)) $('noSerial').classList.remove('hide');
+fetch('manifest.json', {cache:'no-cache'}).then(r => r.json()).then(m => { $('ver').textContent = 'v' + m.version; }).catch(() => {});
+fetch('firmware/firmware.bin', {method:'HEAD', cache:'no-cache'}).then(r => { if (!r.ok) throw 0; }).catch(() => $('noFw').classList.remove('hide'));
+
+/* ----------------------------------------------------- serial connection */
+let port = null, reader = null, writer = null, rxBuf = '', waiters = [], devState = 'none', fwVer = '';
+
+function log(msg, cls){
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  $('term').appendChild(d);
+  $('term').scrollTop = $('term').scrollHeight;
+}
+function setDev(state, ver){
+  devState = state; if (ver !== undefined) fwVer = ver;
+  renderDev();
+}
+function renderDev(){
+  const m = {none:['', 'd_none','d_none_s'], busy:['warn','d_busy',''], ok:['ok','d_ok',''], fail:['bad','d_fail','d_fail_s']}[devState];
+  $('dDev').className = 'dot ' + m[0];
+  $('devTxt').textContent = t(m[1]) + (devState === 'ok' && fwVer ? ' · v' + fwVer : '');
+  $('devSub').textContent = m[2] ? t(m[2]) : '';
+  const on = devState === 'ok';
+  $('bRead').disabled = !on; $('bApply').disabled = devState === 'busy'; $('bClose').disabled = !port;
+  $('bConnect').disabled = devState === 'busy' || !!port;
+}
+
+function onLine(line){
+  line = line.trim();
+  if (!line.startsWith('TB+')) return;
+  waiters = waiters.filter(w => { if (line.startsWith(w.prefix)) { w.resolve(line); return false; } return true; });
+}
+function waitFor(prefixes, ms){
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { waiters = waiters.filter(w => !a.includes(w)); reject(new Error('timeout')); }, ms);
+    const a = prefixes.map(p => ({prefix:p, resolve:l => { clearTimeout(timer); resolve(l); }}));
+    waiters.push(...a);
+  });
+}
+async function readLoop(){
+  const dec = new TextDecoder();
+  try{
+    while (port && port.readable){
+      reader = port.readable.getReader();
+      try{
+        for(;;){
+          const {value, done} = await reader.read();
+          if (done) break;
+          rxBuf += dec.decode(value, {stream:true});
+          let i;
+          while ((i = rxBuf.indexOf('\n')) >= 0){ onLine(rxBuf.slice(0, i)); rxBuf = rxBuf.slice(i + 1); }
+          if (rxBuf.length > 8192) rxBuf = '';
+        }
+      } finally { reader.releaseLock(); reader = null; }
+    }
+  } catch(e){ /* device unplugged or restarted */ }
+  if (port){ await closePort(true); }
+}
+async function sendLine(text){
+  // Short chunks with tiny pauses keep the device's USB receive buffer from overflowing
+  const bytes = new TextEncoder().encode(text + '\n');
+  const w = port.writable.getWriter();
+  try{
+    for (let i = 0; i < bytes.length; i += 64){
+      await w.write(bytes.slice(i, i + 64));
+      await new Promise(r => setTimeout(r, 12));
+    }
+  } finally { w.releaseLock(); }
+}
+async function request(cmd, prefixes, ms = 3000){
+  const p = waitFor(prefixes, ms);
+  await sendLine(cmd);
+  return p;
+}
+async function closePort(lost){
+  const p = port; port = null; waiters = []; rxBuf = '';
+  try{ if (reader) await reader.cancel(); }catch(e){}
+  try{ if (p) await p.close(); }catch(e){}
+  setDev('none', '');
+  log(lost ? t('t_lost') : t('t_closed'));
+}
+
+// Opens the given port and checks that the TreadBridge firmware answers. Returns true on success.
+async function connectPort(p){
+  port = p;
+  setDev('busy');
+  try{
+    log(t('t_connecting'));
+    await port.open({baudRate:115200});
+    try{ await port.setSignals({dataTerminalReady:true, requestToSend:false}); }catch(e){}
+    readLoop();
+    log(t('t_ping'));
+    let pong = null;
+    for (let i = 0; i < 4 && !pong; i++){
+      try{ pong = await request('TB+PING', ['TB+PONG'], 1500); }catch(e){}
+    }
+    if (!pong){ log(t('t_nopong'), 'bad'); await closePort(false); setDev('fail'); return false; }
+    const ver = pong.slice(8).trim();
+    log(t('t_pong', ver), 'ok');
+    setDev('ok', ver);
+    return true;
+  } catch(e){
+    log(String(e.message || e), 'bad');
+    try{ await closePort(false); }catch(_){}
+    setDev('fail');
+    return false;
+  }
+}
+async function pickAndConnect(){
+  if (!('serial' in navigator)){ $('noSerial').classList.remove('hide'); return false; }
+  let p;
+  try{ p = await navigator.serial.requestPort(); }
+  catch(e){ log(t('t_cancel'), 'warn'); return false; }
+  return connectPort(p);
+}
+$('bConnect').onclick = pickAndConnect;
+$('bClose').onclick = () => closePort(false);
+
+/* -------------------------------------------------------- settings form */
+function fpFullName(){
+  const base = $('fpbase').value.trim();
+  const pn = $('pn1').value.trim();
+  const room = Math.max(0, 23 - pn.length);
+  return (base.slice(0, room) + ' ' + pn).trim() + '  /  ' + (base.slice(0, Math.max(0, 23 - $('pn2').value.trim().length)) + ' ' + $('pn2').value.trim()).trim();
+}
+['fpbase','pn1','pn2'].forEach(id => $(id).oninput = () => { $('fpFull').textContent = fpFullName(); });
+$('fpFull').textContent = fpFullName();
+
+// Remember the non-secret fields in this browser (never the passwords)
+const SAVE = ['pn1','pn2','fpbase','wssid','host','apssid'];
+try{
+  const s = JSON.parse(localStorage.getItem('tb_form') || '{}');
+  SAVE.forEach(k => { if (s[k] !== undefined) $(k).value = s[k]; });
+  if (s.forceap) $('forceap').checked = true;
+}catch(e){}
+function rememberForm(){
+  try{
+    const o = {}; SAVE.forEach(k => o[k] = $(k).value); o.forceap = $('forceap').checked;
+    localStorage.setItem('tb_form', JSON.stringify(o));
+  }catch(e){}
+}
+
+function u8len(s){ return [...s].length; }
+function validate(){
+  const pn1 = $('pn1').value.trim(), pn2 = $('pn2').value.trim(), fp = $('fpbase').value.trim();
+  const host = $('host').value.trim().toLowerCase(), aps = $('apssid').value.trim(), app = $('appass').value;
+  if (u8len(pn1) < 1 || u8len(pn1) > 8 || u8len(pn2) < 1 || u8len(pn2) > 8) return t('v_pn');
+  if (u8len(fp) < 1 || u8len(fp) > 14) return t('v_fp');
+  if (!/^[a-z0-9-]{1,24}$/.test(host)) return t('v_host');
+  if (aps.length < 1 || aps.length > 32 || (app.length > 0 && app.length < 8)) return t('v_ap');
+  return '';
+}
+
+$('bRead').onclick = async () => {
+  try{
+    log(t('t_read'));
+    const line = await request('TB+GET', ['TB+CFG'], 3000);
+    const j = JSON.parse(line.slice(7));
+    $('pn1').value = j.pn1; $('pn2').value = j.pn2; $('fpbase').value = j.fpbase;
+    $('wssid').value = j.wssid; $('host').value = j.host; $('apssid').value = j.apssid;
+    $('forceap').checked = !!j.forceap; $('lang2').value = String(j.lang);
+    $('wpass').value = ''; $('appass').value = '';
+    $('wpass').placeholder = j.hasWpass ? '••••••••' : '';
+    $('appass').placeholder = j.hasAppass ? '••••••••' : '';
+    $('fpFull').textContent = fpFullName();
+    log(t('t_readok'), 'ok');
+  }catch(e){ log(t('t_nopong'), 'bad'); }
+};
+
+// Sends the form values to the connected device. Returns true if the device accepted them.
+async function sendSettings(){
+  const err = validate();
+  if (err){ log(err, 'bad'); return false; }
+  rememberForm();
+  const kv = {pn1:$('pn1').value.trim(), pn2:$('pn2').value.trim(), fpbase:$('fpbase').value.trim(),
+              wssid:$('wssid').value.trim(), host:$('host').value.trim().toLowerCase(),
+              apssid:$('apssid').value.trim(), forceap:$('forceap').checked ? '1' : '0', lang:$('lang2').value};
+  if ($('wpass').value) kv.wpass = $('wpass').value;     // only send passwords that were typed
+  if ($('appass').value) kv.appass = $('appass').value;
+  // encodeURIComponent keeps '+', '&' and '=' inside values safe; the device decodes %XX
+  const body = Object.entries(kv).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+  try{
+    log(t('t_send'));
+    const line = await request('TB+SET ' + body, ['TB+OK', 'TB+ERR'], 5000);
+    if (line.startsWith('TB+ERR')){ log(t('t_err') + line.slice(7), 'bad'); return false; }
+    const restart = /"restart":true/.test(line);
+    log(restart ? t('t_ok') : t('t_ok2'), 'ok');
+    $('wpass').value = ''; $('appass').value = '';
+    return true;
+  }catch(e){ log(t('t_nopong'), 'bad'); return false; }
+}
+
+// Manual button: connects first if needed, then sends the settings
+$('bApply').onclick = async () => {
+  if (validate()){ log(validate(), 'bad'); return; }
+  if (devState !== 'ok' && !(await pickAndConnect())) return;
+  await sendSettings();
+};
+
+/* ------------------------------------- automatic apply after flashing */
+// ESP Web Tools announces its progress with "state-changed" events. When the installation is
+// finished we reuse the serial port the user already granted to this site and send the settings.
+let autoRunning = false;
+async function autoApply(){
+  if (autoRunning || !('serial' in navigator)) return;
+  autoRunning = true;
+  try{
+    if (validate()){ log(validate(), 'bad'); return; }
+    log(t('t_wait'));
+    await new Promise(r => setTimeout(r, 3500));      // the board resets and re-enumerates over USB
+    let ok = false;
+    for (let attempt = 0; attempt < 6 && !ok; attempt++){
+      const ports = await navigator.serial.getPorts();
+      for (const p of ports){
+        if (p.readable || p.writable) continue;       // still open somewhere else
+        log(t('t_auto_start'));
+        ok = await connectPort(p);
+        if (ok) break;
+      }
+      if (!ok) await new Promise(r => setTimeout(r, 2500));
+    }
+    if (ok) await sendSettings();
+    else log(t('t_auto_fail'), 'warn');
+  } finally { autoRunning = false; }
+}
+document.querySelector('esp-web-install-button').addEventListener('state-changed', ev => {
+  const st = ev.detail && ev.detail.state;
+  if (st === 'finished' && $('autoApply').checked) autoApply();
+});
+
+/* ---------------------------------------------------------------- start */
+applyLang();
+renderDev();
+const h = (location.hash || '').slice(1);
+if (['flash','guide'].includes(h)) show(h);
+</script>
+</body>
+</html>

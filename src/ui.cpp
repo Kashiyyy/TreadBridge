@@ -1,13 +1,13 @@
 /*
-  Display-Oberflaeche fuer das Waveshare ESP32-C6-Touch-LCD-1.47 (172 x 320, Hoch- oder Querformat)
-  Beim Start: Profilauswahl. Danach vier Seiten, umgeschaltet durch Wischen nach links/rechts
-  (die Leiste unten zeigt, wo man ist):
-    LIVE    Anzeigen fuer Laufband/Uhr, Tempo, Pace, Distanz, Steigung, Zeit
-    GERAET  Bluetooth-Geraet suchen, auswaehlen, trennen (Liste per Wischen nach oben/unten scrollen)
-    FOOT    Foot Pod an/aus, welche Werte an die Uhr gehen, Kadenz, Testtempo
-    SYS     Helligkeit, Auto-Verbinden, Webserver, Ansicht (waagrecht), Geraet vergessen, Profil wechseln
-  Texte duerfen UTF-8 mit Umlauten enthalten, sie werden fuer die Display-Schrift (CP437) umgewandelt.
-  Gezeichnet wird mit Arduino_GFX direkt (ohne LVGL). Es werden nur geaenderte Elemente neu gezeichnet.
+  Display UI for the Waveshare ESP32-C6-Touch-LCD-1.47 (172 x 320, portrait or landscape)
+  On start: profile selection. Then four pages, switched by swiping left/right
+  (the bar at the bottom shows where you are):
+    LIVE    indicators for treadmill/watch, speed, pace, distance, incline, time
+    DEVICE  scan for Bluetooth devices, pick one, disconnect (swipe up/down to scroll the list)
+    FOOT    foot pod on/off, which values go to the watch, cadence, test speed
+    SYS     brightness, auto-connect, web server, orientation (landscape), forget device, switch profile
+  Text may contain UTF-8 umlauts; they are converted for the display font (CP437).
+  Drawing is done with Arduino_GFX directly (no LVGL). Only changed elements are redrawn.
 */
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
@@ -27,21 +27,21 @@ Preferences uiPrefs;
 UiState S;
 
 bool landscape = false;
-int  W = LCD_W, H = LCD_H;               // aktuelle Breite/Hoehe (abhaengig von der Ausrichtung)
-int  TAB_Y = 286, TAB_H = 34;            // Leiste unten
-const int SWIPE_MIN = 40;                // Pixel fuer eine Wischgeste
+int  W = LCD_W, H = LCD_H;               // current width/height (depends on the orientation)
+int  TAB_Y = 286, TAB_H = 34;            // tab bar at the bottom
+const int SWIPE_MIN = 40;                // pixels needed for a swipe gesture
 
-int  page = 0;                           // 0 LIVE, 1 GERAET, 2 FOOT, 3 SYS
+int  page = 0;                           // 0 LIVE, 1 DEVICE, 2 FOOT, 3 SYS
 bool needFull = true;
 int  devScroll = 0;
-int  brightness = 50;                    // Prozent
+int  brightness = 50;                    // percent
 bool forgetArmed = false, profileArmed = false;
 uint32_t armedAt = 0;
 
 uint16_t C_BG, C_FG, C_DIM, C_ACC, C_OK, C_WARN, C_BAD, C_CARD, C_CARD_HI, C_OFF, C_TAB, C_LINE;
 uint32_t keys[128];
 
-// ---------- Text: UTF-8 -> CP437 (Zeichensatz der Display-Schrift) ----------
+// ---------- Text: UTF-8 -> CP437 (character set of the display font) ----------
 void toCp437(const char* in, char* out, size_t n) {
   size_t o = 0, i = 0;
   while (in[i] && o + 1 < n) {
@@ -51,14 +51,14 @@ void toCp437(const char* in, char* out, size_t n) {
     int len = (c >= 0xF0) ? 4 : (c >= 0xE0) ? 3 : 2;
     if (c == 0xC3 && in[i + 1]) {
       switch ((uint8_t)in[i + 1]) {
-        case 0xA4: m = (char)0x84; break;   // ae
-        case 0xB6: m = (char)0x94; break;   // oe
-        case 0xBC: m = (char)0x81; break;   // ue
-        case 0x84: m = (char)0x8E; break;   // AE
-        case 0x96: m = (char)0x99; break;   // OE
-        case 0x9C: m = (char)0x9A; break;   // UE
-        case 0x9F: m = (char)0xE1; break;   // ss
-        case 0xA9: m = (char)0x82; break;   // e akut
+        case 0xA4: m = (char)0x84; break;   // a umlaut
+        case 0xB6: m = (char)0x94; break;   // o umlaut
+        case 0xBC: m = (char)0x81; break;   // u umlaut
+        case 0x84: m = (char)0x8E; break;   // A umlaut
+        case 0x96: m = (char)0x99; break;   // O umlaut
+        case 0x9C: m = (char)0x9A; break;   // U umlaut
+        case 0x9F: m = (char)0xE1; break;   // sharp s
+        case 0xA9: m = (char)0x82; break;   // e acute
         case 0xA8: m = (char)0x8A; break;
         case 0xA0: m = (char)0x85; break;
         case 0xA2: m = (char)0x83; break;
@@ -67,7 +67,7 @@ void toCp437(const char* in, char* out, size_t n) {
         case 0xB1: m = (char)0xA4; break;
       }
     } else if (c == 0xC2 && (uint8_t)in[i + 1] == 0xB0) {
-      m = (char)0xF8;                       // Grad-Zeichen
+      m = (char)0xF8;                       // degree sign
     }
     out[o++] = m;
     for (int k = 0; k < len && in[i]; k++) i++;
@@ -75,7 +75,7 @@ void toCp437(const char* in, char* out, size_t n) {
   out[o] = 0;
 }
 
-// ---------- Zeichenhelfer ----------
+// ---------- Drawing helpers ----------
 bool changed(int id, uint32_t key) {
   if (needFull || keys[id] != key) { keys[id] = key; return true; }
   return false;
@@ -95,7 +95,7 @@ void rawText(int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, const char* s) 
   gfx->print(buf);
 }
 
-// Text mit Zeichenlimit (zu lange Namen werden abgeschnitten, damit nichts ueberlappt)
+// Text with a character limit (names that are too long are cut off so nothing overlaps)
 void rawTextN(int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, const char* s, int maxChars) {
   char cs[96];
   toCp437(s, cs, sizeof cs);
@@ -106,7 +106,7 @@ void rawTextN(int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, const char* s,
   gfx->print(cs);
 }
 
-// Text in festem Feld (chars Zeichen), align: 0 links, 1 mittig, 2 rechts. Zeichnet nur bei Aenderung.
+// Text in a fixed field (chars characters), align: 0 left, 1 center, 2 right. Only redraws on change.
 void put(int id, int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, const char* s, int chars, int align = 0) {
   char cs[96], buf[96];
   toCp437(s, cs, sizeof cs);
@@ -137,7 +137,7 @@ void button(int id, int x, int y, int w, int h, const char* label, uint16_t fill
 
 void pill(int id, int x, int y, bool on, uint16_t bg) {
   if (!changed(id, on ? 1 : 2)) return;
-  gfx->fillRoundRect(x, y, 40, 18, 9, bg);              // Untergrund loeschen
+  gfx->fillRoundRect(x, y, 40, 18, 9, bg);              // clear the background
   gfx->fillRoundRect(x, y, 40, 18, 9, on ? C_OK : C_OFF);
   gfx->fillCircle(on ? x + 31 : x + 9, y + 9, 7, C_FG);
 }
@@ -161,7 +161,7 @@ void setOrientation(bool land) {
   needFull = true;
 }
 
-// Touch liefert Hochformat-Koordinaten; fuer die Querformat-Ansicht umrechnen.
+// Touch reports portrait coordinates; convert them for the landscape view.
 void mapTouch(int& x, int& y) {
   if (!landscape) return;
   int px = x, py = y;
@@ -175,8 +175,8 @@ bool readTouch(int& x, int& y) {
   return d;
 }
 
-// ---------- Display-Initialisierung (JD9853, ST7789-Befehlssatz) ----------
-// Registerfolge laut Waveshare-Beispiel fuer dieses Panel.
+// ---------- Display initialisation (JD9853, ST7789 command set) ----------
+// Register sequence taken from the Waveshare example for this panel.
 void lcdRegInit() {
   static const uint8_t init_operations[] = {
     BEGIN_WRITE,
@@ -242,14 +242,14 @@ void lcdRegInit() {
   bus->batchOperation(init_operations, sizeof(init_operations));
 }
 
-// ---------- Seitentitel und Tab-Leiste ----------
-void drawTitle() {                         // nur Hochformat, Seiten GERAET / FOOT / SYS
+// ---------- Page title and tab bar ----------
+void drawTitle() {                         // portrait only, pages DEVICE / FOOT / SYS
   if (landscape || page == 0) return;
   const char* titles[4] = {"", TR("GERÄTE", "DEVICES"), "FOOT POD", "SYSTEM"};
   put(120, 0, 6, 2, C_FG, C_BG, titles[page], 14, 1);
 }
 
-void drawTabs() {                          // nur Anzeige: wo bin ich? (Wechsel durch Wischen)
+void drawTabs() {                          // display only: where am I? (switch by swiping)
   const char* names[4] = {"LIVE", TR("GERÄT", "DEVICE"), "FOOT", "SYS"};
   const int tw4 = W / 4;
   for (int i = 0; i < 4; i++) {
@@ -265,7 +265,7 @@ void drawTabs() {                          // nur Anzeige: wo bin ich? (Wechsel 
   if (needFull) gfx->drawFastHLine(0, TAB_Y - 1, W, C_LINE);
 }
 
-// ---------- Seite LIVE ----------
+// ---------- Page LIVE ----------
 void indicator(int id, int x, int y, int w, const char* label, const char* status, uint16_t col) {
   uint32_t k = fnv(label) ^ (fnv(status) << 1) ^ ((uint32_t)col << 8);
   if (!changed(id, k)) return;
@@ -291,14 +291,14 @@ void liveStatus(int idL, int idU, int xL, int xU, int y, int w) {
   indicator(idU, xU, y, w, TR("UHR", "WATCH"), su, cu);
 }
 
-// grosse Zahl mit getrennter Breiten-/Hoehenskalierung
+// big number with separate width/height scaling
 void putBig(int id, int x, int y, uint8_t sx, uint8_t sy, uint16_t fg, uint16_t bg, const char* s, int chars) {
   char buf[16];
   int len = (int)strlen(s);
   if (chars > 14) chars = 14;
   if (len > chars) len = chars;
   memset(buf, ' ', chars);
-  memcpy(buf + (chars - len), s, len);                   // rechtsbuendig im Feld
+  memcpy(buf + (chars - len), s, len);                   // right-aligned in the field
   buf[chars] = 0;
   uint32_t k = fnv(buf) ^ ((uint32_t)fg << 16) ^ bg ^ ((uint32_t)sx << 24) ^ ((uint32_t)sy << 28);
   if (!changed(id, k)) return;
@@ -323,14 +323,14 @@ void pageLive() {
 
   if (!landscape) {
     if (needFull) {
-      rawText(124, 102, 2, C_DIM, C_BG, "km/h");                       // Einheit neben der Zahl
+      rawText(124, 102, 2, C_DIM, C_BG, "km/h");                       // unit next to the number
       card(3, 128, 82, 54, C_CARD);   rawText(9, 134, 1, C_DIM, C_CARD, "Pace min/km");
       card(87, 128, 82, 54, C_CARD);  rawText(93, 134, 1, C_DIM, C_CARD, TR("Distanz km", "Distance km"));
       card(3, 188, 166, 48, C_CARD);  rawText(9, 194, 1, C_DIM, C_CARD, TR("Zeit h:min:s", "Time h:min:s"));
       card(3, 242, 166, 36, C_CARD);  rawText(9, 256, 1, C_DIM, C_CARD, TR("Steigung %", "Incline %"));
     }
     liveStatus(21, 22, 3, 87, 10, 82);
-    putBig(10, 2, 54, 5, 8, cNum, C_BG, vN, 4);                        // grosses Tempo (30 x 64 Pixel pro Ziffer)
+    putBig(10, 2, 54, 5, 8, cNum, C_BG, vN, 4);                        // big speed (30 x 64 pixels per digit)
     put(11, 9, 158, 3, cVal, C_CARD, vP, 4);
     put(12, 93, 158, 3, cVal, C_CARD, vD, 4);
     put(13, 9, 208, 3, cVal, C_CARD, vZ, 8);
@@ -340,11 +340,11 @@ void pageLive() {
       rawText(156, 92, 2, C_DIM, C_BG, "km/h");
       card(210, 44, 98, 30, C_CARD);   rawText(216, 47, 1, C_DIM, C_CARD, "Pace min/km");
       card(210, 78, 98, 30, C_CARD);   rawText(216, 81, 1, C_DIM, C_CARD, TR("Distanz km", "Distance km"));
-      card(8, 112, 146, 30, C_CARD);   rawText(14, 123, 1, C_DIM, C_CARD, TR("Zeit", "Time"));          // untere Reihe: gleich gross,
-      card(162, 112, 146, 30, C_CARD); rawText(168, 123, 1, C_DIM, C_CARD, TR("Steigung %", "Incline %"));  // gleiche Hoehe, buendig
+      card(8, 112, 146, 30, C_CARD);   rawText(14, 123, 1, C_DIM, C_CARD, TR("Zeit", "Time"));          // bottom row: same size,
+      card(162, 112, 146, 30, C_CARD); rawText(168, 123, 1, C_DIM, C_CARD, TR("Steigung %", "Incline %"));  // same height, aligned
     }
     liveStatus(21, 22, 8, 158, 4, 146);
-    putBig(10, 8, 44, 6, 8, cNum, C_BG, vN, 4);                        // grosses Tempo (36 x 64 Pixel pro Ziffer)
+    putBig(10, 8, 44, 6, 8, cNum, C_BG, vN, 4);                        // big speed (36 x 64 pixels per digit)
     put(11, 216, 57, 2, cVal, C_CARD, vP, 7);
     put(12, 216, 91, 2, cVal, C_CARD, vD, 7);
     put(13, 48, 119, 2, cVal, C_CARD, vZ, 8);
@@ -352,7 +352,7 @@ void pageLive() {
   }
 }
 
-// ---------- Seite GERAET ----------
+// ---------- Page DEVICE ----------
 int devRows()  { return landscape ? 3 : 4; }
 int devY0()    { return landscape ? 50 : 74; }
 int devStep()  { return landscape ? 34 : 40; }
@@ -400,8 +400,8 @@ void pageDev() {
     if (changed(30 + r, k)) {
       card(dx, y, dw, dh, bg);
       rawTextN(dx + 6, y + (landscape ? 3 : 4), 2, d.ftms ? C_OK : C_FG, bg,
-               d.name[0] ? d.name : TR("(ohne Name)", "(no name)"), landscape ? 24 : 12);     // zu lange Namen abschneiden
-      keys[40 + r] = 0xFFFFFFFFu;     // RSSI-Text neu zeichnen
+               d.name[0] ? d.name : TR("(ohne Name)", "(no name)"), landscape ? 24 : 12);     // cut off names that are too long
+      keys[40 + r] = 0xFFFFFFFFu;     // redraw the RSSI text
     }
     char s[32];
     snprintf(s, sizeof s, "%s %ddBm", d.addr, d.rssi);
@@ -416,9 +416,9 @@ void pageDev() {
   }
 }
 
-// ---------- Seite FOOT ----------
-const int CAD_Y = 198, SIM_Y = 244;           // Hochformat: obere Kante der Plus/Minus-Zeilen (Hoehe 30)
-const int LCAD_Y = 20, LSIM_Y = 80;           // Querformat (Hoehe 34)
+// ---------- Page FOOT ----------
+const int CAD_Y = 198, SIM_Y = 244;           // portrait: top edge of the plus/minus rows (height 30)
+const int LCAD_Y = 20, LSIM_Y = 80;           // landscape (height 34)
 
 void pageFoot() {
   const char* labelsP[5] = {"Foot Pod", TR("Kadenz", "Cadence"), TR("Schrittl.", "Stride"), TR("Distanz", "Distance"), TR("Lauf/Geh", "Run/Walk")};
@@ -462,7 +462,7 @@ void pageFoot() {
   else put(75, 210, LSIM_Y + 9, 2, S.sim >= 0 ? C_WARN : C_DIM, C_BG, b, 5, 1);
 }
 
-// ---------- Seite SYS ----------
+// ---------- Page SYS ----------
 void pageSys() {
   char b[64];
   const char* ws = S.webState == 1 ? TR("Webserver startet...", "Web server starting...")
@@ -486,7 +486,7 @@ void pageSys() {
     button(84, 3, 160, 166, 26, fgt, forgetArmed ? C_BAD : (S.hasSaved ? C_CARD : C_OFF), S.hasSaved ? C_FG : C_DIM, 1);
     button(85, 3, 190, 166, 26, prf, profileArmed ? C_BAD : C_CARD, C_FG, 1);
     put(101, 10, 222, 1, C_DIM, C_BG, ws, 26);
-    for (int i = 0; i < 2; i++) {                       // WLAN-Text auf Zeilen verteilen
+    for (int i = 0; i < 2; i++) {                       // split the WLAN text over several lines
       char line[27] = {0};
       size_t off = (size_t)i * 26;
       if (S.webState == 2 && off < strlen(S.wifi)) strncpy(line, S.wifi + off, 26);
@@ -530,10 +530,10 @@ void pageSys() {
   }
 }
 
-// ---------- Rendern ----------
+// ---------- Rendering ----------
 void render() {
   static int lastLang = -1;
-  if (g_lang != lastLang) { lastLang = g_lang; needFull = true; }      // Sprache gewechselt: alles neu zeichnen
+  if (g_lang != lastLang) { lastLang = g_lang; needFull = true; }      // language changed: redraw everything
   if (needFull) gfx->fillScreen(C_BG);
   drawTitle();
   switch (page) {
@@ -546,7 +546,7 @@ void render() {
   needFull = false;
 }
 
-// ---------- Aktionen ----------
+// ---------- Actions ----------
 void gotoPage(int p) {
   p = (p % 4 + 4) % 4;
   if (p == page) return;
@@ -640,7 +640,7 @@ void tapSys(int x, int y) {
 }
 
 void onTap(int x, int y) {
-  if (y >= TAB_Y) { gotoPage(x / (W / 4)); return; }   // Tippen auf die Leiste geht auch, Wischen ist aber einfacher
+  if (y >= TAB_Y) { gotoPage(x / (W / 4)); return; }   // tapping the bar works too, but swiping is easier
   switch (page) {
     case 1: tapDev(x, y); break;
     case 2: tapFoot(x, y); break;
@@ -650,25 +650,25 @@ void onTap(int x, int y) {
 
 }  // namespace
 
-// ---------- oeffentliche Funktionen ----------
+// ---------- public functions ----------
 void uiBegin() {
-  // Reihenfolge wie im funktionierenden Waveshare-Beispiel: CS-Pins hoch, SPI starten, Display, Beleuchtung
-  Serial.println("[UI] 1: CS-Pins auf HIGH");
-  pinMode(PIN_SD_CS, OUTPUT);  digitalWrite(PIN_SD_CS, HIGH);    // TF-Slot am gemeinsamen SPI-Bus ruhig halten
+  // Same order as in the working Waveshare example: CS pins high, start SPI, display, backlight
+  Serial.println("[UI] 1: CS pins set HIGH");
+  pinMode(PIN_SD_CS, OUTPUT);  digitalWrite(PIN_SD_CS, HIGH);    // keep the TF slot on the shared SPI bus quiet
   pinMode(PIN_LCD_CS, OUTPUT); digitalWrite(PIN_LCD_CS, HIGH);
 
   Serial.println("[UI] 2: SPI.begin");
-  SPI.begin(PIN_LCD_SCK, PIN_SD_MISO, PIN_LCD_MOSI, PIN_SD_CS);  // Bus teilen sich Display und TF-Slot
+  SPI.begin(PIN_LCD_SCK, PIN_SD_MISO, PIN_LCD_MOSI, PIN_SD_CS);  // display and TF slot share the bus
 
   bus = new Arduino_HWSPI(PIN_LCD_DC, PIN_LCD_CS, PIN_LCD_SCK, PIN_LCD_MOSI);
   gfx = new Arduino_ST7789(bus, PIN_LCD_RST, 0 /* Rotation */, false /* IPS */, LCD_W, LCD_H,
                            LCD_COL_OFFSET, LCD_ROW_OFFSET, LCD_COL_OFFSET, LCD_ROW_OFFSET);
   Serial.println("[UI] 3: gfx->begin()");
   bool ok = gfx->begin();
-  Serial.printf("[UI]    begin() %s\n", ok ? "ok" : "FEHLER");
+  Serial.printf("[UI]    begin() %s\n", ok ? "ok" : "ERROR");
   lcdRegInit();
   gfx->setRotation(0);
-  Serial.println("[UI] 4: Panel-Registerfolge gesendet");
+  Serial.println("[UI] 4: panel register sequence sent");
 
   C_BG = gfx->color565(8, 10, 14);      C_FG = gfx->color565(235, 238, 242);
   C_DIM = gfx->color565(130, 138, 150); C_ACC = gfx->color565(0, 200, 140);
@@ -680,35 +680,35 @@ void uiBegin() {
 
   uiPrefs.begin("ui", false);
   brightness = constrain((int)uiPrefs.getUChar("bright", 50), 10, 100);
-  setOrientation(uiPrefs.getBool("land", false));       // gespeicherte Ausrichtung
+  setOrientation(uiPrefs.getBool("land", false));       // stored orientation
   ledcAttach(PIN_LCD_BL, 5000, 8);
   applyBrightness();
-  Serial.printf("[UI] 5: Beleuchtung an (%d%%), %s\n", brightness, landscape ? "waagrecht" : "hochkant");
+  Serial.printf("[UI] 5: backlight on (%d%%), %s\n", brightness, landscape ? "landscape" : "portrait");
 
-  // Selbsttest bei eingeschalteter Beleuchtung: Farbbalken Rot, Gruen, Blau und Text (ca. 1 s)
+  // Self-test with the backlight on: colour bars red, green, blue and text (about 1 s)
   gfx->fillRect(0, 0, W, H / 3, gfx->color565(255, 0, 0));
   gfx->fillRect(0, H / 3, W, H / 3, gfx->color565(0, 255, 0));
   gfx->fillRect(0, 2 * (H / 3), W, H - 2 * (H / 3), gfx->color565(0, 0, 255));
   rawText(W / 2 - 60, H / 2 - 8, 2, C_FG, C_BG, "Display OK");
-  Serial.println("[UI] 6: Farbbalken gezeichnet");
+  Serial.println("[UI] 6: colour bars drawn");
   delay(1000);
   gfx->fillScreen(C_BG);
 
   bool tp = touchBegin();
-  Serial.printf("[UI] 7: Touch-Controller %s\n", tp ? "gefunden" : "NICHT gefunden (I2C-Antwort fehlt)");
+  Serial.printf("[UI] 7: touch controller %s\n", tp ? "found" : "NOT found (no I2C answer)");
 }
 
 void uiSplash(const char* line) {
   if (!gfx) return;
   int y0 = landscape ? 40 : 100;
   gfx->fillRect(0, y0, W, 70, C_BG);
-  rawText(20, y0 + 4, 2, C_ACC, C_BG, TR("Laufband", "Treadmill"));
+  rawText(20, y0 + 4, 2, C_ACC, C_BG, "Tread");
   rawText(20, y0 + 24, 2, C_ACC, C_BG, "Bridge");
   rawText(20, y0 + 50, 1, C_DIM, C_BG, line);
   needFull = true;
 }
 
-// Profilauswahl beim Start: blockiert, bis ein Name angetippt wurde. Namen stehen in include/config.h.
+// Profile selection at startup: blocks until a name has been tapped. Names are set in include/config.h or on the web page.
 int uiChooseProfile(int last) {
   if (last != 2) last = 1;
   gfx->fillScreen(C_BG);
@@ -724,7 +724,7 @@ int uiChooseProfile(int last) {
     int tw = (int)strlen(cs) * 6 * sz;
     rawText(bx[p] + (bw - tw) / 2, by[p] + (bh - 8 * sz) / 2, sz, C_BG, C_ACC, nm);
   }
-  Serial.println("[UI] Profilauswahl wartet auf Touch");
+  Serial.println("[UI] profile selection waiting for touch");
 
   const uint32_t t0 = millis();
   bool wasDown = false;
@@ -753,12 +753,12 @@ void uiLoop() {
   if (down) {
     if (!wasDown) { sx = x; sy = y; tDown = now; }
     lx = x; ly = y;
-  } else if (wasDown) {                                // Finger losgelassen: Tippen oder Wischen auswerten
+  } else if (wasDown) {                                // finger released: evaluate tap or swipe
     int dx = lx - sx, dy = ly - sy;
     if (abs(dx) >= SWIPE_MIN && abs(dx) * 2 > abs(dy) * 3) {
-      gotoPage(dx < 0 ? page + 1 : page - 1);          // nach links wischen = naechste Seite
+      gotoPage(dx < 0 ? page + 1 : page - 1);          // swipe left = next page
     } else if (page == 1 && abs(dy) >= 24 && abs(dy) * 2 > abs(dx) * 3) {
-      int rows = max(1, abs(dy) / devStep());          // Geraeteliste scrollen
+      int rows = max(1, abs(dy) / devStep());          // scroll the device list
       devScroll = dy < 0 ? min(max(0, S.devCount - 1), devScroll + rows) : max(0, devScroll - rows);
     } else if (abs(dx) < 14 && abs(dy) < 14 && now - tDown < 900) {
       onTap(sx, sy);
@@ -775,7 +775,7 @@ void uiLoop() {
     appSnapshot(S);
     render();
     static bool first = true;
-    if (first) { first = false; Serial.println("[UI] erste Seite gezeichnet"); }
+    if (first) { first = false; Serial.println("[UI] first page drawn"); }
   }
   delay(8);
 }

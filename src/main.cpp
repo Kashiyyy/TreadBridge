@@ -1,13 +1,13 @@
 /*
-  Laufband-Bridge - Weboberflaeche
+  TreadBridge - main application
   ESP32-C6 + NimBLE-Arduino 2.x (PlatformIO / pioarduino)
 
-  - Weboberflaeche: Bluetooth-Geraet suchen, auswaehlen, verbinden
-  - zeigt Tempo, Pace, Distanz, Steigung, Zeit live an (FTMS 0x2ACD / RSC 0x2A53)
-  - Daten per HTTP abrufbar: GET /api/data (JSON)
-  - gewaehltes Geraet wird gespeichert und beim naechsten Start automatisch verbunden
-  - Foot Pod: sendet Tempo/Distanz/Kadenz als BLE Running Speed & Cadence (0x1814) an die Garmin-Uhr
-    (ANT+ ist mit dem ESP32-C6 nicht moeglich)
+  - Web interface: scan for Bluetooth devices, pick one, connect
+  - shows speed, pace, distance, incline and time live (FTMS 0x2ACD / RSC 0x2A53)
+  - data available over HTTP: GET /api/data (JSON)
+  - the chosen device is stored and reconnected automatically on the next start
+  - Foot pod: sends speed/distance/cadence as BLE Running Speed & Cadence (0x1814) to the Garmin watch
+    (ANT+ is not possible with the ESP32-C6)
 */
 #include <Arduino.h>
 #include <WiFi.h>
@@ -23,6 +23,7 @@
 #include <vector>
 #include <algorithm>
 #include <deque>
+#include <map>
 #include <stdarg.h>
 #include "config.h"
 #include "app.h"
@@ -46,38 +47,38 @@ std::vector<Dev> devs;
 NimBLEClient* client = nullptr;
 Live live;
 String connName = "", connAddr = "", wifiInfo = "";
-String targetAddr = "", savedName = "";      // gespeichertes Geraet (MAC in Kleinbuchstaben)
+String targetAddr = "", savedName = "";      // saved device (MAC address in lower case)
 volatile bool scanning = false, scanQuiet = false, autoHit = false;
 volatile int pendingConnect = -1;
 volatile bool pendingScan = false, pendingDisc = false, pendingForget = false;
-int autoMiss = 0;                 // Zaehler fuer erfolglose automatische Suchlaeufe (nur zum Drosseln der Logzeilen)
-volatile int pendingFp = -1;   // -1 nichts, 0 aus, 1 an
-volatile int pendingWeb = -1;  // -1 nichts, 0 Webserver aus, 1 an
-volatile uint8_t webState = 0; // 0 aus, 1 startet, 2 laeuft
+int autoMiss = 0;                 // counter of unsuccessful automatic scans (only used to throttle log lines)
+volatile int pendingFp = -1;   // -1 nothing, 0 off, 1 on
+volatile int pendingWeb = -1;  // -1 nothing, 0 web server off, 1 on
+volatile uint8_t webState = 0; // 0 off, 1 starting, 2 running
 bool webEnabled = WEB_DEFAULT_ON;
-int profile = 1;               // aktives Personenprofil (1 oder 2)
-String fpName = FOOTPOD_NAME;  // Name des Foot Pods dieses Profils
+int profile = 1;               // active person profile (1 or 2)
+String fpName = FOOTPOD_NAME;  // foot pod name of this profile
 
-// Einstellungen, die auf der Webseite geaendert werden koennen (Standardwerte stehen in include/config.h)
+// Settings that can be changed on the web page (defaults come from include/config.h)
 struct Cfg {
   String wifiSsid, wifiPass, apSsid, apPass, host, fpBase;
   bool forceAp = false;
 } cfg;
-char profBuf[2][20];                       // Profilnamen (UTF-8)
-volatile bool rawLog = RAW_LOG;            // Rohdaten (Hex) ins Log schreiben
-volatile int g_lang = DEFAULT_LANG;        // Sprache: 0 Deutsch, 1 English (auf der Webseite einstellbar)
-volatile uint32_t restartAt = 0;           // gesetzt: Neustart zu diesem Zeitpunkt
+char profBuf[2][20];                       // profile names (UTF-8)
+volatile bool rawLog = RAW_LOG;            // write raw data (hex) to the log
+volatile int g_lang = DEFAULT_LANG;        // language: 0 German, 1 English (can be changed on the web page)
+volatile uint32_t restartAt = 0;           // when set: restart at this time
 bool autoEnabled = false;
 uint32_t lastAttempt = 0, manualUntil = 0;
 
-// Foot Pod (BLE-Peripheral, Running Speed & Cadence)
+// Foot pod (BLE peripheral, Running Speed & Cadence)
 NimBLEServer* bleServer = nullptr;
 NimBLECharacteristic* rscMeas = nullptr;
 bool fpEnabled = FOOTPOD_AUTOSTART;
-volatile int cadenceManual = CADENCE_MANUAL;   // 0 = automatisch aus dem Tempo schaetzen
-volatile float simSpeed = -1;                  // >= 0: Testtempo statt Laufband (km/h)
-double fpDist = 0;                             // an die Uhr gesendete Gesamtdistanz (m)
-long fpLastTm = -1;                            // letzte Laufband-Distanz (m)
+volatile int cadenceManual = CADENCE_MANUAL;   // 0 = estimate automatically from the speed
+volatile float simSpeed = -1;                  // >= 0: test speed instead of the treadmill (km/h)
+double fpDist = 0;                             // total distance sent to the watch (m)
+long fpLastTm = -1;                            // last treadmill distance (m)
 uint32_t fpLastTick = 0;
 float fpSpeedOut = 0; int fpCadOut = 0;
 volatile bool fpSubscribed = false;
@@ -85,12 +86,12 @@ uint32_t fpSent = 0;
 
 SemaphoreHandle_t mtx = nullptr;
 String lastMsg = "";
-std::deque<String> logBuf;                 // Ringpuffer fuer das Log auf der Webseite
-uint32_t logSeq = 0;                       // letzte Statusmeldung (wird auf der Seite angezeigt)
-volatile uint8_t fpMask = FP_DEFAULT_MASK; // bit0 Kadenz, bit1 Schrittlaenge, bit2 Distanz, bit3 Laufen/Gehen
+std::deque<String> logBuf;                 // ring buffer for the log on the web page
+uint32_t logSeq = 0;                       // last status message (shown on the page)
+volatile uint8_t fpMask = FP_DEFAULT_MASK; // bit0 cadence, bit1 stride length, bit2 distance, bit3 running/walking
 volatile bool pendingSaveMask = false;
 
-// ---------------- Hilfsfunktionen ----------------
+// ---------------- Helper functions ----------------
 void blog(const char* fmt, ...) {
   char b[360];
   va_list a; va_start(a, fmt); vsnprintf(b, sizeof b, fmt, a); va_end(a);
@@ -133,17 +134,17 @@ String esc(const String& s) {
 }
 
 String lower(String s) { s.toLowerCase(); return s; }
-String pk(const char* base) { return String(base) + String(profile); }   // Einstellung pro Profil
+String pk(const char* base) { return String(base) + String(profile); }   // setting per profile
 void setWifi(const String& v) { xSemaphoreTake(mtx, portMAX_DELAY); wifiInfo = v; xSemaphoreGive(mtx); }
 
 const char* profileName(int p) { return profBuf[p == 2 ? 1 : 0]; }
 
-void setProfName(int idx, const String& n) {            // idx 0 oder 1
+void setProfName(int idx, const String& n) {            // idx 0 or 1
   strncpy(profBuf[idx], n.c_str(), sizeof profBuf[idx] - 1);
   profBuf[idx][sizeof profBuf[idx] - 1] = 0;
 }
 
-// Einstellungen aus dem Flash laden; was dort fehlt, kommt aus include/config.h bzw. defaults.h
+// Load settings from flash; anything missing there comes from include/config.h or defaults.h
 void loadCfg() {
   cfg.wifiSsid = prefs.getString("wssid", WIFI_SSID);
   cfg.wifiPass = prefs.getString("wpass", WIFI_PASS);
@@ -175,7 +176,7 @@ void forgetTarget() {
   autoEnabled = false;
 }
 
-// ---------------- Dekodierung ----------------
+// ---------------- Decoding ----------------
 void parseFTMS(const uint8_t* d, size_t n) {   // 0x2ACD Treadmill Data
   if (n < 2) return;
   uint16_t f = d[0] | (d[1] << 8);
@@ -184,11 +185,11 @@ void parseFTMS(const uint8_t* d, size_t n) {   // 0x2ACD Treadmill Data
   auto u16 = [&]() { uint16_t v = d[p] | (d[p + 1] << 8); p += 2; return v; };
   Live t;
   xSemaphoreTake(mtx, portMAX_DELAY); t = live; xSemaphoreGive(mtx);
-  if (!(f & 0x0001) && ok(2)) t.speed = u16() / 100.0f;          // Momentangeschwindigkeit
-  if ((f & 0x0002) && ok(2)) p += 2;                              // Durchschnittsgeschw.
+  if (!(f & 0x0001) && ok(2)) t.speed = u16() / 100.0f;          // instantaneous speed
+  if ((f & 0x0002) && ok(2)) p += 2;                              // average speed
   if ((f & 0x0004) && ok(3)) { t.dist = d[p] | (d[p + 1] << 8) | (d[p + 2] << 16); p += 3; }
   if ((f & 0x0008) && ok(4)) { int16_t v = (int16_t)u16(); t.incl = v / 10.0f; p += 2; }
-  if ((f & 0x0010) && ok(4)) p += 4;                              // Hoehenmeter
+  if ((f & 0x0010) && ok(4)) p += 4;                              // elevation gain
   if ((f & 0x0020) && ok(1)) p += 1;                              // Pace
   if ((f & 0x0040) && ok(1)) p += 1;                              // Avg Pace
   if ((f & 0x0080) && ok(5)) { t.kcal = u16(); p += 3; }
@@ -247,26 +248,16 @@ class ScanCB : public NimBLEScanCallbacks {
     }
     if (!found && devs.size() < 80) devs.push_back(nd);
     xSemaphoreGive(mtx);
-    // nur automatische Suchlaeufe verbinden von selbst, manuelle nie
-    if (scanQuiet && autoEnabled && !autoHit && !isConn() && hasTarget() && matchTarget(merged)) {
-      autoHit = true;
-      NimBLEDevice::getScan()->stop();   // loest onScanEnd aus
-    }
+    // only automatic scans connect by themselves, manual scans never do.
+    // We only raise a flag here: the BLE task stops the scan and starts the connection.
+    // (In NimBLE-Arduino 2.x scan->stop() does NOT call onScanEnd, so the old code left
+    // "scanning" stuck on true and the automatic reconnect never happened.)
+    if (scanQuiet && autoEnabled && !autoHit && !isConn() && hasTarget() && matchTarget(merged)) autoHit = true;
   }
   void onScanEnd(const NimBLEScanResults& r, int reason) override {
     scanning = false;
     lastAttempt = millis();
-    int hit = -1;
-    if (autoEnabled && autoHit) {
-      for (size_t i = 0; i < devs.size(); i++) if (matchTarget(devs[i])) { hit = (int)i; break; }
-    }
-    autoHit = false;
-    if (hit >= 0) {
-      autoMiss = 0;
-      blog(TR("Gespeichertes Gerät gefunden: %s", "Saved device found: %s"), devs[hit].name.c_str());
-      pendingConnect = hit;
-      return;
-    }
+    if (autoHit) return;                 // saved device was seen: the BLE task starts the connection
     if (scanQuiet) {
       if ((autoMiss++ % 10) == 0) blog(TR("Gespeichertes Gerät noch nicht gefunden - suche weiter (Laufband eingeschaltet?)", "Saved device not found yet - still searching (treadmill switched on?)"));
     } else {
@@ -290,21 +281,40 @@ class CliCB : public NimBLEClientCallbacks {
   }
 } cliCB;
 
+// Called from the BLE task after the automatic scan saw the saved device:
+// stop the scan and queue the connection.
+void handleAutoHit() {
+  autoHit = false;
+  NimBLEScan* sc = NimBLEDevice::getScan();
+  if (sc->isScanning()) sc->stop();
+  scanning = false;
+  lastAttempt = millis();
+  int hit = -1;
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  for (size_t i = 0; i < devs.size(); i++) if (matchTarget(devs[i])) { hit = (int)i; break; }
+  String nm = hit >= 0 ? devs[hit].name : String();
+  xSemaphoreGive(mtx);
+  if (hit < 0 || isConn()) return;
+  autoMiss = 0;
+  blog(TR("Gespeichertes Gerät gefunden: %s", "Saved device found: %s"), nm.c_str());
+  pendingConnect = hit;
+}
+
 void startScan(bool quiet) {
   scanQuiet = quiet;
   lastAttempt = millis();
   autoHit = false;
-  if (!quiet) {                       // manuelle Suche: Liste leeren, automatische Suche 60 s pausieren
+  if (!quiet) {                       // manual scan: clear the list, pause automatic scanning for 60 s
     xSemaphoreTake(mtx, portMAX_DELAY); devs.clear(); xSemaphoreGive(mtx);
     manualUntil = millis() + 60000;
   }
   NimBLEScan* sc = NimBLEDevice::getScan();
   sc->setScanCallbacks(&scanCB, true);
   sc->setActiveScan(true);
-  if (quiet) { sc->setInterval(AUTO_SCAN_INTERVAL); sc->setWindow(AUTO_SCAN_WINDOW); }   // automatische Suche (nur wenn ein gespeichertes Geraet fehlt)
-  else       { sc->setInterval(160); sc->setWindow(50); }    // manuelle Suche: ~30 % Funkzeit, WLAN bleibt nutzbar
+  if (quiet) { sc->setInterval(AUTO_SCAN_INTERVAL); sc->setWindow(AUTO_SCAN_WINDOW); }   // automatic scan (only while the saved device is missing)
+  else       { sc->setInterval(160); sc->setWindow(50); }    // manual scan: ~30 % radio time, WLAN stays usable
   scanning = sc->start(quiet ? AUTO_SCAN_MS : SCAN_MS, false);
-  if (!quiet) blog(scanning ? "Suche gestartet (%lu s)..." : "Suche konnte nicht starten", SCAN_MS / 1000);
+  if (!quiet) blog(scanning ? "Scan started (%lu s)..." : "Scan could not start", SCAN_MS / 1000);
 }
 
 void doConnect(int idx) {
@@ -321,13 +331,13 @@ void doConnect(int idx) {
   blog(TR("Verbinde mit %s ...", "Connecting to %s ..."), addr.c_str());
   if (!client->connect(d.addr)) { blog(TR("Verbindung fehlgeschlagen (Fehlercode %d)", "Connection failed (error code %d)"), client->getLastError()); lastAttempt = millis(); return; }
   xSemaphoreTake(mtx, portMAX_DELAY); live = Live(); xSemaphoreGive(mtx);
-  if (!client->getService("1826") && !client->getService("1814")) {   // Fitness Machine bzw. Running Speed & Cadence
+  if (!client->getService("1826") && !client->getService("1814")) {   // Fitness Machine or Running Speed & Cadence
     blog(TR("Kein Laufband: Gerät hat keinen Fitness-Dienst (FTMS).", "Not a treadmill: device has no fitness service (FTMS)."));
     client->disconnect();
     lastAttempt = millis();
     return;
   }
-  client->updateConnParams(80, 160, 0, 500);   // Laufband sendet ~1 Paket/s: 100-200 ms Intervall genuegt
+  client->updateConnParams(80, 160, 0, 500);   // treadmill sends ~1 packet/s: a 100-200 ms interval is enough
   String nm = d.name.length() ? d.name : addr;
   setConn(nm, addr);
   blog(TR("Verbunden mit %s", "Connected to %s"), nm.c_str());
@@ -350,7 +360,7 @@ void doConnect(int idx) {
   blog(TR("Gerät gespeichert. Warte auf Daten (Laufband starten / Tempo aendern)...", "Device saved. Waiting for data (start the treadmill / change speed) ..."));
 }
 
-// ---------------- Foot Pod (RSC 0x1814) ----------------
+// ---------------- Foot pod (RSC 0x1814) ----------------
 class RscCb : public NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic* c, NimBLEConnInfo& info, uint16_t subValue) override {
     fpSubscribed = subValue != 0;
@@ -361,8 +371,8 @@ class RscCb : public NimBLECharacteristicCallbacks {
 class SrvCb : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* sv, NimBLEConnInfo& info) override {
     blog(TR("Uhr verbunden: %s (Intervall %.1f ms)", "Watch connected: %s (interval %.1f ms)"), info.getAddress().toString().c_str(), info.getConnInterval() * 1.25f);
-    // Lange Verbindungsintervalle: die Uhr braucht nur ~1 Paket/s, das laesst dem WLAN Funkzeit
-    sv->updateConnParams(info.getConnHandle(), 80, 160, 0, 500);   // 100-200 ms, Timeout 5 s
+    // Long connection intervals: the watch only needs ~1 packet/s, which leaves radio time for WLAN
+    sv->updateConnParams(info.getConnHandle(), 80, 160, 0, 500);   // 100-200 ms, timeout 5 s
   }
   void onConnParamsUpdate(NimBLEConnInfo& info) override {
     blog(TR("Uhr-Verbindung: Intervall jetzt %.1f ms", "Watch link: interval now %.1f ms"), info.getConnInterval() * 1.25f);
@@ -382,7 +392,7 @@ void setupFootpod() {
   rscMeas = rsc->createCharacteristic("2A53", NIMBLE_PROPERTY::NOTIFY);
   rscMeas->setCallbacks(&rscCb);
 
-  // Feature: Bit0 Schrittlaenge, Bit1 Gesamtdistanz, Bit2 Walking/Running-Status
+  // Feature: bit0 stride length, bit1 total distance, bit2 walking/running status
   auto* feat = rsc->createCharacteristic("2A54", NIMBLE_PROPERTY::READ);
   uint8_t f[2] = {0x07, 0x00};
   feat->setValue(f, 2);
@@ -396,7 +406,7 @@ void setupFootpod() {
   adv->setAppearance(0x0440);  // Running Walking Sensor
   adv->enableScanResponse(true);
   adv->setName(fpName.c_str());
-  adv->setMinInterval(400);   // 250 ms (Einheit 0,625 ms) - schont das WLAN
+  adv->setMinInterval(400);   // 250 ms (unit 0.625 ms) - easier on the WLAN
   adv->setMaxInterval(480);   // 300 ms
   if (fpEnabled) adv->start();
 }
@@ -409,7 +419,7 @@ void setFootpod(bool on) {
   prefs.putBool(pk("fpon").c_str(), on);
 }
 
-int estimateCadence(float kmh) {              // Schritte/min, grobe Schaetzung aus dem Tempo
+int estimateCadence(float kmh) {              // steps/min, rough estimate from the speed
   if (kmh < 1.0f) return 0;
   float c = kmh < 7.0f ? 90.0f + kmh * 5.0f : 150.0f + (kmh - 7.0f) * 5.0f;
   return (int)constrain(c, 0.0f, 254.0f);
@@ -422,11 +432,11 @@ void sendFootpod() {
 
   Live L;
   xSemaphoreTake(mtx, portMAX_DELAY); L = live; xSemaphoreGive(mtx);
-  bool fresh = L.lastMs != 0 && (now - L.lastMs) < 5000;     // Laufband sendet noch Daten?
+  bool fresh = L.lastMs != 0 && (now - L.lastMs) < 5000;     // is the treadmill still sending data?
   float kmh = simSpeed >= 0 ? simSpeed : ((fresh && L.speed > 0) ? L.speed : 0.0f);
   float v = kmh / 3.6f;                                       // m/s
 
-  bool useTm = simSpeed < 0 && fresh && L.dist >= 0;          // echte Laufband-Distanz bevorzugen
+  bool useTm = simSpeed < 0 && fresh && L.dist >= 0;          // prefer the real treadmill distance
   if (useTm) {
     if (fpLastTm >= 0 && L.dist >= fpLastTm) fpDist += (L.dist - fpLastTm);
     fpLastTm = L.dist;
@@ -443,14 +453,14 @@ void sendFootpod() {
   if (!bleServer || bleServer->getConnectedCount() == 0) return;
 
   uint16_t speed = (uint16_t)(v * 256.0f);                                        // 1/256 m/s
-  uint16_t stride = cad > 0 ? (uint16_t)(v * 120.0f / cad * 100.0f) : 0;          // 1/100 m (2 Schritte)
+  uint16_t stride = cad > 0 ? (uint16_t)(v * 120.0f / cad * 100.0f) : 0;          // 1/100 m (2 steps)
   uint32_t dist = (uint32_t)(fpDist * 10.0);                                      // 1/10 m
-  // Flags: Bit0 Schrittlaenge, Bit1 Distanz, Bit2 Status (1 = Laufen, 0 = Gehen)
+  // Flags: bit0 stride length, bit1 distance, bit2 status (1 = running, 0 = walking)
   uint8_t flags = (wStride ? 0x01 : 0) | (wDist ? 0x02 : 0) | ((wStatus && kmh >= 7.0f) ? 0x04 : 0);
   uint8_t d[10]; size_t n = 0;
   d[n++] = flags;
-  d[n++] = (uint8_t)speed; d[n++] = (uint8_t)(speed >> 8);   // Geschwindigkeit immer
-  d[n++] = (uint8_t)(wCad ? cad : 0);                         // Kadenz-Feld ist Pflicht, 0 wenn abgeschaltet
+  d[n++] = (uint8_t)speed; d[n++] = (uint8_t)(speed >> 8);   // speed is always sent
+  d[n++] = (uint8_t)(wCad ? cad : 0);                         // the cadence field is mandatory, 0 when switched off
   if (wStride) { d[n++] = (uint8_t)stride; d[n++] = (uint8_t)(stride >> 8); }
   if (wDist) { d[n++] = (uint8_t)dist; d[n++] = (uint8_t)(dist >> 8); d[n++] = (uint8_t)(dist >> 16); d[n++] = (uint8_t)(dist >> 24); }
   rscMeas->setValue(d, n);
@@ -468,7 +478,7 @@ String argStr(AsyncWebServerRequest* req, const char* name) {
 
 static void cp(char* d, size_t n, const String& s) { strncpy(d, s.c_str(), n - 1); d[n - 1] = 0; }
 
-// Momentaufnahme aller Werte (thread-sicher) fuer Webseite und Display
+// Snapshot of all values (thread-safe) for the web page and the display
 void appSnapshot(UiState& u) {
   memset(&u, 0, sizeof(u));
   const uint32_t now = millis();
@@ -493,7 +503,7 @@ void appSnapshot(UiState& u) {
   L = live;
   std::vector<int> idx;
   for (size_t i = 0; i < devs.size(); i++) idx.push_back((int)i);
-  std::sort(idx.begin(), idx.end(), [](int a, int b) {       // Fitness zuerst, dann mit Namen, dann Signal
+  std::sort(idx.begin(), idx.end(), [](int a, int b) {       // fitness devices first, then named devices, then by signal strength
     const Dev& x = devs[a]; const Dev& y = devs[b];
     if (x.ftms != y.ftms) return x.ftms;
     bool nx = x.name.length() > 0, ny = y.name.length() > 0;
@@ -522,7 +532,7 @@ void appSnapshot(UiState& u) {
   cp(u.liveSrc, sizeof u.liveSrc, L.src);
 }
 
-// Aktionen (von Display und Web): setzen nur Merker, die Bluetooth-Task fuehrt sie aus
+// Actions (from display and web): they only set flags, the Bluetooth task executes them
 void actScan() { pendingScan = true; }
 void actDisconnect() { pendingDisc = true; }
 void actConnect(int idx) { pendingConnect = idx; }
@@ -541,7 +551,7 @@ void actSim(float kmh) { simSpeed = kmh < 0 ? -1.0f : constrain(kmh, 0.0f, 40.0f
 static const char* tf(bool v) { return v ? "true" : "false"; }
 
 void handleState(AsyncWebServerRequest* req) {
-  static UiState u;                 // Handler laufen nacheinander im async_tcp-Task
+  static UiState u;                 // handlers run one after another in the async_tcp task
   appSnapshot(u);
   String j; j.reserve(3600);
   j += "{\"profile\":" + String(u.profile) + ",\"profName\":\"" + esc(String(profileName(u.profile))) + "\"";
@@ -575,7 +585,7 @@ void handleLog(AsyncWebServerRequest* req) {
   String j; j.reserve(4096);
   xSemaphoreTake(mtx, portMAX_DELAY);
   uint32_t first = logSeq - (uint32_t)logBuf.size();
-  if (since < first || since > logSeq) since = first;     // zu alt oder Gerät neu gestartet
+  if (since < first || since > logSeq) since = first;     // too old, or the device was restarted
   j += "{\"lines\":[";
   for (uint32_t k = since; k < logSeq; k++) {
     if (k > since) j += ',';
@@ -586,8 +596,8 @@ void handleLog(AsyncWebServerRequest* req) {
   req->send(200, "application/json", j);
 }
 
-// ---- Einstellungen (Webseite) ----
-static int u8len(const String& s) {          // Anzahl Zeichen (nicht Bytes) in UTF-8
+// ---- Settings (web page) ----
+static int u8len(const String& s) {          // number of characters (not bytes) in UTF-8
   int n = 0;
   for (size_t i = 0; i < s.length(); i++) if (((uint8_t)s[i] & 0xC0) != 0x80) n++;
   return n;
@@ -603,16 +613,21 @@ void handleSettingsGet(AsyncWebServerRequest* req) {
   req->send(200, "application/json", j);
 }
 
-void handleSettingsPost(AsyncWebServerRequest* req) {
-  auto P = [&](const char* n) -> String { return req->hasParam(n, true) ? req->getParam(n, true)->value() : String(); };
-  String pn1 = P("pn1"), pn2 = P("pn2"), fpb = P("fpbase"), ws = P("wssid"), wp = P("wpass");
-  String host = P("host"), aps = P("apssid"), app = P("appass");
-  bool force = P("forceap") == "1";
-  const bool hasLang = req->hasParam("lang", true);
-  const int newLang = P("lang") == "1" ? 1 : 0;
+typedef std::map<String, String> KV;
+
+// Validates and stores settings. Keys that are missing keep their current value.
+// Used by the web page (POST /api/settings) and by the serial provisioning (TB+SET).
+static bool applySettings(const KV& in, const char*& err, bool& needRestart) {
+  auto G = [&](const char* k, const String& cur) -> String { auto it = in.find(k); return it == in.end() ? cur : it->second; };
+  String pn1 = G("pn1", profileName(1)), pn2 = G("pn2", profileName(2)), fpb = G("fpbase", cfg.fpBase);
+  String ws = G("wssid", cfg.wifiSsid), wp = G("wpass", ""), host = G("host", cfg.host);
+  String aps = G("apssid", cfg.apSsid), app = G("appass", "");
+  bool force = G("forceap", cfg.forceAp ? "1" : "0") == "1";
+  const bool hasLang = in.count("lang") > 0;
+  const int newLang = G("lang", "0") == "1" ? 1 : 0;
   pn1.trim(); pn2.trim(); fpb.trim(); ws.trim(); host.trim(); host.toLowerCase(); aps.trim();
 
-  const char* err = nullptr;
+  err = nullptr;
   if (u8len(pn1) < 1 || u8len(pn1) > 8 || pn1.length() > 16) err = TR("Profil 1: 1 bis 8 Zeichen", "Profile 1: 1 to 8 characters");
   else if (u8len(pn2) < 1 || u8len(pn2) > 8 || pn2.length() > 16) err = TR("Profil 2: 1 bis 8 Zeichen", "Profile 2: 1 to 8 characters");
   else if (u8len(fpb) < 1 || u8len(fpb) > 14 || fpb.length() > 20) err = TR("Foot-Pod-Name: 1 bis 14 Zeichen", "Foot pod name: 1 to 14 characters");
@@ -627,13 +642,13 @@ void handleSettingsPost(AsyncWebServerRequest* req) {
       if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) { err = TR("Hostname: nur a-z, 0-9 und Bindestrich", "Hostname: only a-z, 0-9 and hyphen"); break; }
     }
   }
-  if (err) { req->send(200, "application/json", String("{\"ok\":false,\"error\":\"") + err + "\"}"); return; }
+  if (err) return false;
 
-  const bool needRestart = (ws != cfg.wifiSsid) || wp.length() > 0 || host != cfg.host || aps != cfg.apSsid ||
-                           app.length() > 0 || force != cfg.forceAp || fpb != cfg.fpBase ||
-                           pn1 != String(profileName(1)) || pn2 != String(profileName(2));
-  if (hasLang) { g_lang = newLang; prefs.putUChar("lang", (uint8_t)newLang); }   // Sprache gilt sofort (Display, Webseite, Log)
-  setProfName(0, pn1); setProfName(1, pn2);              // Profilnamen gelten sofort (Display, Webseite)
+  needRestart = (ws != cfg.wifiSsid) || wp.length() > 0 || host != cfg.host || aps != cfg.apSsid ||
+                app.length() > 0 || force != cfg.forceAp || fpb != cfg.fpBase ||
+                pn1 != String(profileName(1)) || pn2 != String(profileName(2));
+  if (hasLang) { g_lang = newLang; prefs.putUChar("lang", (uint8_t)newLang); }   // language applies immediately (display, web page, log)
+  setProfName(0, pn1); setProfName(1, pn2);              // profile names apply immediately (display, web page)
   cfg.wifiSsid = ws; if (wp.length()) cfg.wifiPass = wp;
   cfg.apSsid = aps;  if (app.length()) cfg.apPass = app;
   cfg.host = host; cfg.fpBase = fpb; cfg.forceAp = force;
@@ -642,10 +657,25 @@ void handleSettingsPost(AsyncWebServerRequest* req) {
   prefs.putString("host", host); prefs.putString("apssid", aps); if (app.length()) prefs.putString("appass", app);
   prefs.putBool("forceap", force);
   blog(TR("Einstellungen gespeichert%s", "Settings saved%s"), needRestart ? TR(" (Neustart nötig für WLAN/Foot-Pod-Name)", " (restart needed for WLAN/foot pod name)") : "");
+  return true;
+}
+
+void handleSettingsPost(AsyncWebServerRequest* req) {
+  KV in;
+  for (size_t i = 0; i < req->params(); i++) {
+    const AsyncWebParameter* p = req->getParam(i);
+    if (p->isPost()) in[p->name()] = p->value();
+  }
+  const char* err = nullptr;
+  bool needRestart = false;
+  if (!applySettings(in, err, needRestart)) {
+    req->send(200, "application/json", String("{\"ok\":false,\"error\":\"") + err + "\"}");
+    return;
+  }
   req->send(200, "application/json", String("{\"ok\":true,\"restart\":") + tf(needRestart) + "}");
 }
 
-void handleData(AsyncWebServerRequest* req) {   // einfache JSON-Schnittstelle zum Abrufen der Werte
+void handleData(AsyncWebServerRequest* req) {   // simple JSON interface to read the values
   static UiState u;
   appSnapshot(u);
   String j = String("{\"connected\":") + (u.ble == 2 ? "true" : "false") + ",\"device\":\"" + esc(String(u.connName)) + "\"";
@@ -661,8 +691,83 @@ void handleData(AsyncWebServerRequest* req) {   // einfache JSON-Schnittstelle z
   req->send(res);
 }
 
-// ---------------- Bluetooth-Task ----------------
-// Laeuft getrennt von Display/Touch, damit langes Verbinden die Oberflaeche nicht blockiert.
+// ---------------- Serial provisioning (used by the web flasher) ----------------
+// Line protocol over USB, one command per line:
+//   TB+PING                    -> TB+PONG <firmware version>
+//   TB+GET                     -> TB+CFG {json}   (passwords are never sent back)
+//   TB+SET key=value&key=...   -> TB+OK {"restart":true|false} | TB+ERR <message>   (values are percent-encoded)
+//   TB+RESTART                 -> restarts the device
+// Keys: wssid wpass host apssid appass forceap pn1 pn2 fpbase lang
+static String urlDecode(const String& s) {
+  String o; o.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '+') o += ' ';
+    else if (c == '%' && i + 2 < s.length() && isxdigit(s[i + 1]) && isxdigit(s[i + 2])) {
+      char h[3] = {s[i + 1], s[i + 2], 0};
+      o += (char)strtol(h, nullptr, 16); i += 2;
+    } else o += c;
+  }
+  return o;
+}
+
+static KV parseKV(const String& s) {
+  KV kv;
+  int pos = 0;
+  while (pos <= (int)s.length()) {
+    int amp = s.indexOf('&', pos);
+    if (amp < 0) amp = s.length();
+    String pair = s.substring(pos, amp);
+    int eq = pair.indexOf('=');
+    if (eq > 0) kv[urlDecode(pair.substring(0, eq))] = urlDecode(pair.substring(eq + 1));
+    pos = amp + 1;
+  }
+  return kv;
+}
+
+static void serialCommand(String line) {
+  line.trim();
+  if (!line.startsWith("TB+")) return;
+  if (line == "TB+PING") {
+    Serial.println(String("TB+PONG ") + FW_VERSION_FULL);
+  } else if (line == "TB+GET") {
+    String j = "{\"fw\":\"" FW_VERSION_FULL "\",\"pn1\":\"" + esc(String(profileName(1))) + "\",\"pn2\":\"" + esc(String(profileName(2))) +
+               "\",\"fpbase\":\"" + esc(cfg.fpBase) + "\",\"wssid\":\"" + esc(cfg.wifiSsid) + "\",\"hasWpass\":" + tf(cfg.wifiPass.length() > 0) +
+               ",\"host\":\"" + esc(cfg.host) + "\",\"apssid\":\"" + esc(cfg.apSsid) + "\",\"hasAppass\":" + tf(cfg.apPass.length() > 0) +
+               ",\"forceap\":" + tf(cfg.forceAp) + ",\"lang\":" + String((int)g_lang) + "}";
+    Serial.println("TB+CFG " + j);
+  } else if (line.startsWith("TB+SET ")) {
+    KV in = parseKV(line.substring(7));
+    const char* err = nullptr;
+    bool needRestart = false;
+    if (applySettings(in, err, needRestart)) {
+      Serial.println(String("TB+OK {\"restart\":") + tf(needRestart) + "}");
+      if (needRestart) { delay(600); ESP.restart(); }
+    } else {
+      Serial.println(String("TB+ERR ") + err);
+    }
+  } else if (line == "TB+RESTART") {
+    Serial.println("TB+OK {\"restart\":true}");
+    delay(300); ESP.restart();
+  } else {
+    Serial.println("TB+ERR unknown command");
+  }
+}
+
+void serialTask(void*) {
+  String line;
+  for (;;) {
+    while (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == '\n') { serialCommand(line); line = ""; }
+      else if (c != '\r' && line.length() < 1800) line += c;
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+// ---------------- Bluetooth task ----------------
+// Runs separately from display/touch so that a long connect does not block the UI.
 void bleTask(void*) {
   for (;;) {
     if (fpEnabled && millis() - fpLastTick >= 1000) sendFootpod();
@@ -673,6 +778,9 @@ void bleTask(void*) {
     }
     if (pendingFp >= 0) { int on = pendingFp; pendingFp = -1; setFootpod(on == 1); }
     if (pendingForget) { pendingForget = false; forgetTarget(); if (isConn()) pendingDisc = true; blog(TR("Gespeichertes Gerät vergessen", "Saved device forgotten")); }
+    // keep our flag in sync with the real scanner state (stop() and errors do not always call onScanEnd)
+    if (scanning && !NimBLEDevice::getScan()->isScanning()) { scanning = false; lastAttempt = millis(); }
+    if (autoHit) handleAutoHit();
     if (pendingScan) { pendingScan = false; startScan(false); }
     if (pendingDisc) { pendingDisc = false; autoEnabled = false; if (isConn()) client->disconnect(); }
     if (pendingConnect >= 0) { int i = pendingConnect; pendingConnect = -1; doConnect(i); }
@@ -682,12 +790,12 @@ void bleTask(void*) {
   }
 }
 
-// ---------------- Webserver / WLAN (eigene Task, damit nichts blockiert) ----------------
+// ---------------- Web server / WLAN (own task so nothing blocks) ----------------
 static bool routesAdded = false;
 
 void setupRoutes() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    req->send(req->beginResponse(200, "text/html", (const uint8_t*)PAGE, sizeof(PAGE) - 1));   // ohne Kopie aus dem Flash
+    req->send(req->beginResponse(200, "text/html", (const uint8_t*)PAGE, sizeof(PAGE) - 1));   // served straight from flash without a copy
   });
   server.on("/api/state", HTTP_GET, handleState);
   server.on("/api/data", HTTP_GET, handleData);
@@ -741,7 +849,7 @@ void startNet() {
   if (!routesAdded) { setupRoutes(); routesAdded = true; }
   server.begin();
   webState = 2;
-  Serial.printf("[NET] Webserver läuft: http://%s.local\n", cfg.host.c_str());
+  Serial.printf("[NET] Web server running: http://%s.local\n", cfg.host.c_str());
   blog(TR("Webserver läuft", "Web server running"));
 }
 
@@ -752,7 +860,7 @@ void stopNet() {
   WiFi.mode(WIFI_OFF);
   setWifi("");
   webState = 0;
-  Serial.println("[NET] Webserver aus (WLAN aus)");
+  Serial.println("[NET] Web server off (WLAN off)");
   blog(TR("Webserver aus", "Web server off"));
 }
 
@@ -766,36 +874,39 @@ void netTask(void*) {
       if (webEnabled && webState == 0) startNet();
       else if (!webEnabled && webState != 0) stopNet();
     }
-    if (restartAt && (int32_t)(millis() - restartAt) >= 0) { Serial.println("[SYS] Neustart"); delay(50); ESP.restart(); }
+    if (restartAt && (int32_t)(millis() - restartAt) >= 0) { Serial.println("[SYS] Restart"); delay(50); ESP.restart(); }
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
 // ---------------- Setup / Loop ----------------
 void setup() {
+  Serial.setRxBufferSize(2048);   // must be called before begin(); the web flasher sends long settings lines
   Serial.begin(115200);
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
+  Serial.println("[SYS] TreadBridge " FW_VERSION_FULL);
   mtx = xSemaphoreCreateMutex();
   uiBegin();
   prefs.begin("bridge", false);
-  loadCfg();                                   // Einstellungen (Namen, WLAN ...) laden
+  loadCfg();                                   // load settings (names, WLAN ...)
+  xTaskCreate(serialTask, "serial", 8192, nullptr, 1, nullptr);   // serial provisioning, runs even while the profile screen is shown
 
-  // Profilauswahl: erst danach werden Bluetooth und Foot Pod gestartet
+  // Profile selection: Bluetooth and the foot pod are only started afterwards
   profile = uiChooseProfile(prefs.getUChar("lastprof", 1));
   if (profile != 2) profile = 1;
   prefs.putUChar("lastprof", (uint8_t)profile);
-  {  // Name des Foot Pods = FOOTPOD_NAME + Profilname, z. B. "FootPod Person 1" (BLE-Namen kurz halten, Profilname bleibt ganz)
+  {  // Foot pod name = FOOTPOD_NAME + profile name, e.g. "FootPod Person 1" (keep the BLE name short, the profile name stays complete)
     String base = cfg.fpBase;
     int room = 24 - 1 - (int)strlen(profileName(profile));
     if (room < 0) room = 0;
     if ((int)base.length() > room) base = base.substring(0, room);
     fpName = base + " " + profileName(profile);
   }
-  Serial.printf("[SETUP] Profil %d (%s), Foot Pod '%s'\n", profile, profileName(profile), fpName.c_str());
+  Serial.printf("[SETUP] Profile %d (%s), foot pod '%s'\n", profile, profileName(profile), fpName.c_str());
   uiSplash(profileName(profile));
 
-  // Einstellungen: pro Profil (Foot Pod) bzw. gemeinsam (Laufband, Webserver)
+  // Settings: per profile (foot pod) or shared (treadmill, web server)
   fpMask = prefs.getUChar(pk("fpmask").c_str(), FP_DEFAULT_MASK) & 0x0F;
   cadenceManual = prefs.getInt(pk("cad").c_str(), CADENCE_MANUAL);
   fpEnabled = prefs.getBool(pk("fpon").c_str(), FOOTPOD_AUTOSTART);
@@ -805,31 +916,31 @@ void setup() {
   autoEnabled = AUTO_CONNECT && hasTarget();
 
   NimBLEDevice::init(fpName.c_str());
-  {  // Eigene Bluetooth-Adresse je Profil: die Uhr merkt sich den Foot Pod ueber diese Adresse,
-     // so verbindet sich die Uhr von Person 1 nie mit dem Foot Pod von Person 2.
+  {  // Own Bluetooth address per profile: the watch remembers the foot pod by this address,
+     // so the watch of person 1 never connects to the foot pod of person 2.
     uint64_t mac = ESP.getEfuseMac();
     uint8_t a[6];
     for (int i = 0; i < 6; i++) a[i] = (uint8_t)((mac >> (8 * i)) & 0xFF);
     a[0] = (uint8_t)(a[0] + profile * 0x11);
-    a[5] = (uint8_t)((a[5] & 0x3F) | 0xC0);               // Random-Static-Adresse
+    a[5] = (uint8_t)((a[5] & 0x3F) | 0xC0);               // random static address
     bool okA = NimBLEDevice::setOwnAddr(a);
     bool okT = NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
-    Serial.printf("[SETUP] BLE-Adresse Profil %d: %02X:%02X:%02X:%02X:%02X:%02X (%s)\n", profile,
-                  a[5], a[4], a[3], a[2], a[1], a[0], (okA && okT) ? "ok" : "FEHLER");
+    Serial.printf("[SETUP] BLE address profile %d: %02X:%02X:%02X:%02X:%02X:%02X (%s)\n", profile,
+                  a[5], a[4], a[3], a[2], a[1], a[0], (okA && okT) ? "ok" : "ERROR");
   }
 #ifdef HAVE_COEX
-  if (COEX_PREFER_WIFI) esp_coex_preference_set(ESP_COEX_PREFER_WIFI);   // WLAN bekommt bei Funk-Konflikten Vorrang
+  if (COEX_PREFER_WIFI) esp_coex_preference_set(ESP_COEX_PREFER_WIFI);   // WLAN gets priority on radio conflicts
 #endif
   fpLastTick = millis();
   setupFootpod();
   if (autoEnabled) {
     blog(TR("Verbinde automatisch mit gespeichertem Gerät %s", "Connecting automatically to saved device %s"), savedName.length() ? savedName.c_str() : targetAddr.c_str());
-    lastAttempt = millis() - AUTO_PAUSE_MS;   // sofort starten
+    lastAttempt = millis() - AUTO_PAUSE_MS;   // start immediately
   } else {
     blog(TR("Bereit. Auf dem Display (Seite GERÄT) das Laufband wählen.", "Ready. Choose the treadmill on the display (page DEVICE)."));
   }
-  xTaskCreate(bleTask, "ble", 10240, nullptr, 1, nullptr);   // Bluetooth-Ablauf getrennt von Display/Touch
-  xTaskCreate(netTask, "net", 8192, nullptr, 1, nullptr);    // WLAN + Webserver (ein/aus per Display)
+  xTaskCreate(bleTask, "ble", 10240, nullptr, 1, nullptr);   // Bluetooth logic separate from display/touch
+  xTaskCreate(netTask, "net", 8192, nullptr, 1, nullptr);    // WLAN + web server (on/off via display)
 }
 
 void loop() {

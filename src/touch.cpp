@@ -16,7 +16,7 @@ static bool readReg(uint8_t reg, uint8_t* buf, size_t n) {
 
 bool touchBegin() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
-  Wire.setTimeOut(50);                       // I2C darf nie lange blockieren
+  Wire.setTimeOut(50);                       // I2C must never block for long
   pinMode(PIN_TP_RST, OUTPUT);
   digitalWrite(PIN_TP_RST, LOW);
   delay(100);
@@ -25,7 +25,7 @@ bool touchBegin() {
   pinMode(PIN_TP_INT, INPUT_PULLUP);
   attachInterrupt(PIN_TP_INT, touchIsr, FALLING);
   uint8_t id[3] = {0};
-  return readReg(0x08, id, 3);               // ID-Register
+  return readReg(0x08, id, 3);               // ID register
 }
 
 bool touchPoll(int& x, int& y) {
@@ -34,11 +34,11 @@ bool touchPoll(int& x, int& y) {
   static int lx = 0, ly = 0;
   const uint32_t now = millis();
 
-  if (g_int) {                               // Controller meldet neue Daten
+  if (g_int) {                               // controller reports new data
     g_int = false;
     uint8_t d[14] = {0};
     if (readReg(0x01, d, 14)) {
-      if (d[1] > 0) {                        // d[1] = Anzahl Beruehrungen
+      if (d[1] > 0) {                        // d[1] = number of touches
         int rx = ((d[2] & 0x0F) << 8) | d[3];
         int ry = ((d[4] & 0x0F) << 8) | d[5];
         int tx = rx, ty = ry;
@@ -54,7 +54,7 @@ bool touchPoll(int& x, int& y) {
       }
     }
   }
-  if (pressed && now - lastEvent > 150) pressed = false;   // Loslassen ohne Meldung abfangen
+  if (pressed && now - lastEvent > 150) pressed = false;   // catch a release without a report
   if (pressed) { x = lx; y = ly; }
   return pressed;
 }

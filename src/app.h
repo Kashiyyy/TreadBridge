@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// Schnittstelle zwischen Anwendung (Bluetooth, Foot Pod, Web) und Display-Oberflaeche.
+// Interface between the application (Bluetooth, foot pod, web) and the display UI.
 
 struct UiDev {
   char name[22];
@@ -10,20 +10,20 @@ struct UiDev {
   bool ftms;
   bool saved;
   bool connected;
-  int  idx;            // Index in der Geraeteliste der Anwendung (fuer actConnect)
+  int  idx;            // index in the application's device list (for actConnect)
 };
 
 struct UiState {
-  uint8_t ble;                 // Laufband: 0 getrennt, 1 sucht, 2 verbunden
-  bool    scanning;            // Bluetooth-Suche laeuft (auch bei verbundenem Laufband)
+  uint8_t ble;                 // treadmill: 0 disconnected, 1 searching, 2 connected
+  bool    scanning;            // Bluetooth scan running (also while the treadmill is connected)
   char connName[24];
   char savedName[24];
   char savedAddr[18];
   bool hasSaved, autoOn;
   char wifi[64];
-  char host[24];               // Hostname (fuer die Anzeige "http://<host>.local")
+  char host[24];               // hostname (for showing "http://<host>.local")
   char msg[64];
-  // Laufbanddaten
+  // treadmill data
   bool  liveFresh;
   float speed; long dist; float incl; int hr, timeS, kcal;
   uint32_t ageMs;
@@ -34,34 +34,34 @@ struct UiState {
   uint32_t fpSent;
   float fpSpeed, fpDist, sim;
   int   fpCad, cadManual;
-  uint8_t mask;                // bit0 Kadenz, bit1 Schrittlaenge, bit2 Distanz, bit3 Laufen/Gehen
-  // Profil und Webserver
-  int   profile;               // 1 oder 2
-  bool  webOn;                 // Webserver gewuenscht
-  uint8_t webState;            // 0 aus, 1 startet, 2 laeuft
-  // Geraeteliste (sortiert: Fitness zuerst, dann mit Namen, dann Signalstaerke)
+  uint8_t mask;                // bit0 cadence, bit1 stride length, bit2 distance, bit3 running/walking
+  // profile and web server
+  int   profile;               // 1 or 2
+  bool  webOn;                 // web server requested
+  uint8_t webState;            // 0 off, 1 starting, 2 running
+  // device list (sorted: fitness first, then named, then signal strength)
   int   devCount;
   UiDev devs[20];
 };
 
-extern volatile int g_lang;                 // Sprache: 0 Deutsch, 1 English (auf der Webseite einstellbar)
+extern volatile int g_lang;                 // language: 0 German, 1 English (can be changed on the web page)
 #define TR(de, en) (g_lang ? (en) : (de))
 
 void appSnapshot(UiState& s);
-const char* profileName(int p);   // Profilname (1 oder 2), auf der Webseite aenderbar
+const char* profileName(int p);   // profile name (1 or 2), can be changed on the web page
 void actScan();
 void actDisconnect();
 void actConnect(int idx);
-void actForget();                // vergisst das gespeicherte Laufband
+void actForget();                // forget the saved treadmill
 void actAuto(bool on);
 void actFootpod(bool on);
 void actMask(uint8_t m);
-void actCadence(int spm);      // 0 = automatisch
-void actSim(float kmh);        // < 0 = aus
-void actWeb(bool on);          // Webserver (und WLAN) ein/aus
-void actRestart();             // Neustart (Profilwechsel)
+void actCadence(int spm);      // 0 = automatic
+void actSim(float kmh);        // < 0 = off
+void actWeb(bool on);          // web server (and WLAN) on/off
+void actRestart();             // restart (profile switch)
 
 void uiBegin();
 void uiSplash(const char* line);
 void uiLoop();
-int  uiChooseProfile(int lastProfile);   // blockiert, bis am Display ein Profil gewaehlt wurde (1 oder 2)
+int  uiChooseProfile(int lastProfile);   // blocks until a profile has been chosen on the display (1 or 2)
