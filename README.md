@@ -4,6 +4,8 @@
 
 An ESP32-C6 reads the live data of a Bluetooth treadmill (tested with the **Fitifito FT700**), shows it on a **touch display** (Waveshare ESP32-C6-Touch-LCD-1.47) and on a **web page**, and sends it to your **Garmin watch** as a Bluetooth *Foot Pod* (speed and distance for indoor runs, no GPS needed).
 
+> **Compatibility:** TreadBridge was tested with the **Fitifito FT700** treadmill and the **Garmin Forerunner 970** only. It is not limited to these devices: any treadmill that offers the Bluetooth *Fitness Machine Service* (FTMS) and any watch that supports a Bluetooth foot pod (*Running Speed & Cadence*) should work as well. Wherever the FT700 or the Forerunner 970 is mentioned below, it is just the tested example.
+
 > 🌐 **No tools needed:** install and configure the firmware straight from your browser with the **[TreadBridge Web Flasher](https://kashiyyy.github.io/TreadBridge/)** (Chrome / Edge on a desktop computer).
 
 - Live **speed, pace, distance, incline and time** on the display and in any browser
@@ -45,8 +47,8 @@ An ESP32-C6 reads the live data of a Bluetooth treadmill (tested with the **Fiti
 |------|-------|
 | **Waveshare ESP32-C6-Touch-LCD-1.47** | The board with the 1.47" touch display (172 × 320) |
 | **USB-C data cable** | Charge-only cables will not work |
-| **Bluetooth treadmill** | Must offer the *Fitness Machine Service* (FTMS) or *Running Speed & Cadence*. Tested: Fitifito FT700 (shows up as `FS-…`) |
-| **Garmin watch** | Tested with the Forerunner 970 (see [the note on compatibility](#garmin-foot-pod-setup)) |
+| **Bluetooth treadmill** | Must offer the *Fitness Machine Service* (FTMS) or *Running Speed & Cadence*. Tested: Fitifito FT700 (shows up as `FS-…`). Other treadmills with these services should work too |
+| **Watch with Bluetooth foot pod support** | Tested with the Garmin Forerunner 970. Other watches that support a Bluetooth foot pod should work too (see [the note on compatibility](#garmin-foot-pod-setup)) |
 | **2.4 GHz WLAN** | Optional but recommended, for the web page. Without it the ESP32 opens its own WLAN |
 
 ---
@@ -187,15 +189,15 @@ The ESP32-C6 forwards the treadmill data as a Bluetooth foot pod (service `0x181
 
 **Which values are sent to the watch?** On the web page (card *Foot pod*, “Sent to the watch”) or on the display (page FOOT): **speed** is always sent; **cadence, stride length, distance** and **running/walking** can be switched on individually. The choice is stored. The default is speed only (`FP_DEFAULT_MASK` in `config.h`). Values that are not sent are simply missing from the packet; only the cadence field is mandatory and is then sent as 0.
 
-**Set up the watch (Forerunner 970):**
+**Set up the watch (tested: Garmin Forerunner 970):**
 
 1. Make sure the foot pod is on (default) and the treadmill is connected.
-2. On the watch go to *Sensors & Accessories*, add a new sensor of type **Foot Pod** and select **TreadBridge <your profile name>**. Menu names can differ between firmware versions.
+2. On the watch go to *Sensors & Accessories*, add a new sensor of type **Foot Pod** and select **TreadBridge <your profile name>**. Menu names can differ between watch models and firmware versions.
 3. In the treadmill activity use the foot pod for speed/distance (instead of GPS/estimation).
 
 **Test without a treadmill:** enter a test speed (for example 8.0 km/h) on the web page (or on page FOOT). The ESP32 then sends this speed to the watch, so you can check whether the watch finds and uses the sensor.
 
-**Please note:** ANT+ is **not possible** with the ESP32-C6. Whether the Forerunner 970 accepts a *Bluetooth* foot pod as speed source is not documented – the test mode shows it quickly. If it does not, ANT+ (a sensor or an ANT+ USB stick) remains.
+**Please note:** ANT+ is **not possible** with the ESP32-C6. Any watch that supports a *Bluetooth* foot pod should be able to use TreadBridge, but whether a particular model accepts it as speed source depends on the watch – the test mode shows it quickly. If it does not, ANT+ (a sensor or an ANT+ USB stick) remains.
 
 ---
 
