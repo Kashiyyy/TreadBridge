@@ -108,6 +108,7 @@ esp-web-install-button{--esp-tools-button-color:#00C88C;--esp-tools-button-text-
     <ol>
       <li data-i="f1_a"></li>
       <li data-i="f1_b"></li>
+      <li data-i="f1_c"></li>
     </ol>
     <label class="chk"><input type="checkbox" id="autoApply" checked> <span data-i="st2_auto"></span></label>
     <div class="btns">
@@ -189,21 +190,17 @@ en:{
  nosupport:'Flashing needs the Web Serial API. Use Google Chrome, Microsoft Edge or Opera on a desktop computer (Windows, macOS, Linux or ChromeOS). Firefox, Safari and mobile browsers do not support it.',
  nofw_t:'Firmware not published yet',
  nofw:'The firmware files were not found next to this page. They are built automatically by the GitHub Action – wait until it has finished (Actions tab of the repository) and reload this page.',
- f1_t:'Install the firmware',f1_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
  f1_a:'Connect the board with a USB-C cable that can transfer data.',
  f1_b:'Click the button below and choose the serial port of the board (usually “USB JTAG/serial debug unit” or “USB Serial”).',
+ f1_c:'When the installer says it is finished, close its window. Your settings are then sent automatically.',
  f1_btn:'Install TreadBridge',
  f1_https:'This page must be opened over https:// or from localhost.',
  f1_note:'Your saved settings and the saved treadmill are kept when you update. If the port does not show up: hold BOOT, tap RESET, release BOOT and try again.',
- f2_t:'Configure (optional)',f2_s:'Name, WLAN, language – no coding, no config file',
- f2_btn:'Go to settings',
  after_t:'After flashing',
  after_1:'The display asks “Who is running?” – tap your name.',
  after_2:'Open http://treadbridge.local (or the IP address shown on the SYS page) on a phone or PC in the same WLAN.',
  after_3:'Without WLAN settings the device opens its own WLAN “TreadBridge” (password treadbridge123) → http://192.168.4.1.',
  s_connect:'Connect to device',s_read:'Read from device',s_close:'Disconnect',
- s_conn_hint:'The device must already run the TreadBridge firmware and be connected via USB.',
- s_apply:'Save to device',
  s_apply_hint:'The device saves the values and restarts. Empty password fields leave the stored passwords unchanged.',
  d_none:'Not connected',d_none_s:'Click “Connect to device”.',
  d_ok:'Connected',d_busy:'Connecting …',d_fail:'No answer from the device',
@@ -222,7 +219,7 @@ en:{
  t_closed:'Port closed.',t_lost:'Connection closed (the device restarted).',t_cancel:'No port selected.',
  v_pn:'Profile names need 1 to 8 characters.',v_fp:'Foot pod name needs 1 to 14 characters.',
  v_host:'Hostname: only a-z, 0-9 and hyphen (max. 24).',v_ap:'Own WLAN: name 1–32 characters, password empty or at least 8.',
- g_t:'Quick start',g_1:'Fill in your settings (WLAN, names, language) – optional.',g_2:'Click “Install TreadBridge”. The settings are sent automatically afterwards.',
+ g_t:'Quick start',g_1:'Fill in your settings (WLAN, names, language) – optional.',g_2:'Click “Install TreadBridge”. When it is finished, close the installer window – the settings are then sent automatically.',
  g_3:'On the display tap your profile name.',g_4:'Open the device’s web page and scan for devices, then connect your treadmill.',
  g_5:'On the watch add a new foot pod sensor and pick “TreadBridge <profile>”.',
  g_trouble:'Troubleshooting',
@@ -241,21 +238,17 @@ de:{
  nosupport:'Zum Flashen wird die Web-Serial-API benötigt. Nutze Google Chrome, Microsoft Edge oder Opera am Computer (Windows, macOS, Linux oder ChromeOS). Firefox, Safari und mobile Browser unterstützen sie nicht.',
  nofw_t:'Firmware noch nicht veröffentlicht',
  nofw:'Die Firmware-Dateien wurden neben dieser Seite nicht gefunden. Sie werden automatisch von der GitHub Action gebaut – warte, bis sie fertig ist (Reiter Actions im Repository), und lade die Seite neu.',
- f1_t:'Firmware installieren',f1_s:'Waveshare ESP32-C6-Touch-LCD-1.47',
  f1_a:'Das Board mit einem USB-C-Kabel anschließen, das Daten überträgt.',
  f1_b:'Unten auf den Knopf klicken und den seriellen Port des Boards wählen (meist „USB JTAG/serial debug unit“ oder „USB Serial“).',
+ f1_c:'Wenn der Installer „fertig“ meldet, sein Fenster schließen. Danach werden deine Einstellungen automatisch gesendet.',
  f1_btn:'TreadBridge installieren',
  f1_https:'Diese Seite muss über https:// oder von localhost geöffnet werden.',
  f1_note:'Gespeicherte Einstellungen und das gespeicherte Laufband bleiben bei einem Update erhalten. Erscheint kein Port: BOOT halten, kurz RESET drücken, BOOT loslassen und erneut versuchen.',
- f2_t:'Konfigurieren (optional)',f2_s:'Name, WLAN, Sprache – ohne Programmieren, ohne Config-Datei',
- f2_btn:'Zu den Einstellungen',
  after_t:'Nach dem Flashen',
  after_1:'Das Display fragt „Wer läuft?“ – tippe deinen Namen an.',
  after_2:'Öffne http://treadbridge.local (oder die IP-Adresse von der Seite SYS) am Handy oder PC im selben WLAN.',
  after_3:'Ohne WLAN-Daten öffnet das Gerät sein eigenes WLAN „TreadBridge“ (Passwort treadbridge123) → http://192.168.4.1.',
  s_connect:'Mit Gerät verbinden',s_read:'Vom Gerät lesen',s_close:'Trennen',
- s_conn_hint:'Auf dem Gerät muss schon die TreadBridge-Firmware laufen, und es muss per USB verbunden sein.',
- s_apply:'Auf Gerät speichern',
  s_apply_hint:'Das Gerät speichert die Werte und startet neu. Leere Passwortfelder lassen die gespeicherten Passwörter unverändert.',
  d_none:'Nicht verbunden',d_none_s:'Klicke auf „Mit Gerät verbinden“.',
  d_ok:'Verbunden',d_busy:'Verbinde …',d_fail:'Keine Antwort vom Gerät',
@@ -274,7 +267,7 @@ de:{
  t_closed:'Port geschlossen.',t_lost:'Verbindung beendet (das Gerät hat neu gestartet).',t_cancel:'Kein Port gewählt.',
  v_pn:'Profilnamen brauchen 1 bis 8 Zeichen.',v_fp:'Foot-Pod-Name braucht 1 bis 14 Zeichen.',
  v_host:'Hostname: nur a-z, 0-9 und Bindestrich (max. 24).',v_ap:'Eigenes WLAN: Name 1–32 Zeichen, Passwort leer oder mindestens 8.',
- g_t:'Schnellstart',g_1:'Einstellungen ausfüllen (WLAN, Namen, Sprache) – optional.',g_2:'Auf „TreadBridge installieren“ klicken. Die Einstellungen werden danach automatisch übertragen.',
+ g_t:'Schnellstart',g_1:'Einstellungen ausfüllen (WLAN, Namen, Sprache) – optional.',g_2:'Auf „TreadBridge installieren“ klicken. Wenn der Installer fertig ist, sein Fenster schließen – die Einstellungen werden danach automatisch gesendet.',
  g_3:'Am Display deinen Profilnamen antippen.',g_4:'Die Webseite des Geräts öffnen, Geräte suchen und das Laufband verbinden.',
  g_5:'An der Uhr einen neuen Foot-Pod-Sensor hinzufügen und „TreadBridge <Profil>“ wählen.',
  g_trouble:'Fehlersuche',
@@ -505,8 +498,7 @@ $('bApply').onclick = async () => {
 };
 
 /* ------------------------------------- automatic apply after flashing */
-// ESP Web Tools announces its progress with "state-changed" events. When the installation is
-// finished we reuse the serial port the user already granted to this site and send the settings.
+// Reuses the serial port the user already granted to this site during installation.
 let autoRunning = false;
 async function autoApply(){
   if (autoRunning || !('serial' in navigator)) return;
@@ -530,10 +522,21 @@ async function autoApply(){
     else log(t('t_auto_fail'), 'warn');
   } finally { autoRunning = false; }
 }
-document.querySelector('esp-web-install-button').addEventListener('state-changed', ev => {
-  const st = ev.detail && ev.detail.state;
-  if (st === 'finished' && $('autoApply').checked) autoApply();
-});
+
+// ESP Web Tools 4+ no longer fires "state-changed" on the button: the installer lives in its own
+// <ewt-install-dialog> that is added to the page and removed again when the user closes it.
+// So we start the automatic apply as soon as that dialog disappears.
+let sawDialog = false;
+new MutationObserver(muts => {
+  for (const m of muts){
+    for (const n of m.addedNodes) if (n.nodeName === 'EWT-INSTALL-DIALOG') sawDialog = true;
+    for (const n of m.removedNodes) if (n.nodeName === 'EWT-INSTALL-DIALOG' && sawDialog){
+      sawDialog = false;
+      console.log('[TreadBridge] install dialog closed');
+      if ($('autoApply').checked) autoApply();
+    }
+  }
+}).observe(document.body, {childList:true, subtree:true});
 
 /* ---------------------------------------------------------------- start */
 applyLang();
