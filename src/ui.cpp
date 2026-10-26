@@ -336,19 +336,21 @@ void pageLive() {
     put(13, 9, 208, 3, cVal, C_CARD, vZ, 8);
     put(14, 94, 250, 2, cVal, C_CARD, vS, 6, 2);
   } else {
+    // Right column (x 210..308): pace, distance, incline - all the same size (98 x 30), same left edge as the top watch box.
+    // Left of it: speed (big) and the wider time box. Top row and bottom row end at x = 308.
     if (needFull) {
       rawText(156, 92, 2, C_DIM, C_BG, "km/h");
       card(210, 44, 98, 30, C_CARD);   rawText(216, 47, 1, C_DIM, C_CARD, "Pace min/km");
       card(210, 78, 98, 30, C_CARD);   rawText(216, 81, 1, C_DIM, C_CARD, TR("Distanz km", "Distance km"));
-      card(8, 112, 146, 30, C_CARD);   rawText(14, 123, 1, C_DIM, C_CARD, TR("Zeit", "Time"));          // bottom row: same size,
-      card(162, 112, 146, 30, C_CARD); rawText(168, 123, 1, C_DIM, C_CARD, TR("Steigung %", "Incline %"));  // same height, aligned
+      card(210, 112, 98, 30, C_CARD);  rawText(216, 115, 1, C_DIM, C_CARD, TR("Steigung %", "Incline %"));
+      card(8, 112, 194, 30, C_CARD);   rawText(14, 123, 1, C_DIM, C_CARD, TR("Zeit", "Time"));
     }
-    liveStatus(21, 22, 8, 158, 4, 146);
+    liveStatus(21, 22, 8, 162, 4, 146);                                 // 8..154 and 162..308 (right edge = pace/distance/incline)
     putBig(10, 8, 44, 6, 8, cNum, C_BG, vN, 4);                        // big speed (36 x 64 pixels per digit)
     put(11, 216, 57, 2, cVal, C_CARD, vP, 7);
     put(12, 216, 91, 2, cVal, C_CARD, vD, 7);
-    put(13, 48, 119, 2, cVal, C_CARD, vZ, 8);
-    put(14, 242, 119, 2, cVal, C_CARD, vS, 4, 2);
+    put(14, 216, 125, 2, cVal, C_CARD, vS, 7);
+    put(13, 100, 119, 2, cVal, C_CARD, vZ, 8);                         // time, right-aligned in its box
   }
 }
 
@@ -359,6 +361,8 @@ int devStep()  { return landscape ? 34 : 40; }
 int devH()     { return landscape ? 30 : 36; }
 int devW()     { return landscape ? 304 : 166; }
 int devX()     { return landscape ? 8 : 3; }
+const int DEV_BW = 73, DEV_BGAP = 4;                       // landscape button row: 4 * 73 + 3 * 4 = 304 = list width
+inline int DEV_BX(int i) { return 8 + i * (DEV_BW + DEV_BGAP); }
 
 void pageDev() {
   const bool conn = S.ble == 2, scan = S.scanning;
@@ -368,15 +372,16 @@ void pageDev() {
   const char* tScan = scan ? TR("SUCHE..", "SCAN..") : TR("SUCHEN", "SCAN");
   char b[64];
   if (!landscape) {
-    button(10, 1, 28, 85, 30, tScan, cS, fS, 2);
-    button(11, 87, 28, 84, 30, TR("TRENN.", "DISC."), cT, fT, 2);
+    button(10, 3, 28, 82, 30, tScan, cS, fS, 2);                       // 3..85 and 87..169 = same width as the list
+    button(11, 87, 28, 82, 30, TR("TRENN.", "DISC."), cT, fT, 2);
     button(13, 3, 238, 80, 24, TR("AUF", "UP"), C_CARD, C_FG, 2);
     button(14, 89, 238, 80, 24, TR("AB", "DOWN"), C_CARD, C_FG, 2);
   } else {
-    button(10, 8, 8, 76, 28, tScan, cS, fS, 2);
-    button(11, 88, 8, 76, 28, TR("TRENN.", "DISC."), cT, fT, 2);
-    button(13, 166, 8, 70, 28, TR("AUF", "UP"), C_CARD, C_FG, 2);
-    button(14, 240, 8, 66, 28, TR("AB", "DOWN"), C_CARD, C_FG, 2);
+    // four equal buttons (73 px) with equal gaps (4 px) from x = 8 to x = 312 = left and right edge of the device list
+    button(10, DEV_BX(0), 8, DEV_BW, 28, tScan, cS, fS, 2);
+    button(11, DEV_BX(1), 8, DEV_BW, 28, TR("TRENN.", "DISC."), cT, fT, 2);
+    button(13, DEV_BX(2), 8, DEV_BW, 28, TR("AUF", "UP"), C_CARD, C_FG, 2);
+    button(14, DEV_BX(3), 8, DEV_BW, 28, TR("AB", "DOWN"), C_CARD, C_FG, 2);
   }
 
   if (S.hasSaved) snprintf(b, sizeof b, "%s %.14s", TR("Gespeichert:", "Saved:"), S.savedName[0] ? S.savedName : S.savedAddr);
@@ -583,15 +588,15 @@ void doOrientation() {
 
 void tapDev(int x, int y) {
   if (!landscape) {
-    if (inRect(x, y, 1, 28, 85, 30)) { if (!S.scanning) actScan(); return; }
-    if (inRect(x, y, 87, 28, 84, 30)) { if (S.ble == 2) actDisconnect(); return; }
+    if (inRect(x, y, 3, 28, 82, 30)) { if (!S.scanning) actScan(); return; }
+    if (inRect(x, y, 87, 28, 82, 30)) { if (S.ble == 2) actDisconnect(); return; }
     if (inRect(x, y, 3, 238, 80, 24)) { devScroll = max(0, devScroll - devRows()); return; }
     if (inRect(x, y, 89, 238, 80, 24)) { if (devScroll + devRows() < S.devCount) devScroll += devRows(); return; }
   } else {
-    if (inRect(x, y, 8, 8, 76, 28)) { if (!S.scanning) actScan(); return; }
-    if (inRect(x, y, 88, 8, 76, 28)) { if (S.ble == 2) actDisconnect(); return; }
-    if (inRect(x, y, 166, 8, 70, 28)) { devScroll = max(0, devScroll - devRows()); return; }
-    if (inRect(x, y, 240, 8, 66, 28)) { if (devScroll + devRows() < S.devCount) devScroll += devRows(); return; }
+    if (inRect(x, y, DEV_BX(0), 8, DEV_BW, 28)) { if (!S.scanning) actScan(); return; }
+    if (inRect(x, y, DEV_BX(1), 8, DEV_BW, 28)) { if (S.ble == 2) actDisconnect(); return; }
+    if (inRect(x, y, DEV_BX(2), 8, DEV_BW, 28)) { devScroll = max(0, devScroll - devRows()); return; }
+    if (inRect(x, y, DEV_BX(3), 8, DEV_BW, 28)) { if (devScroll + devRows() < S.devCount) devScroll += devRows(); return; }
   }
   for (int r = 0; r < devRows(); r++) {
     if (inRect(x, y, devX(), devY0() + r * devStep(), devW(), devH())) {

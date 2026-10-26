@@ -290,6 +290,11 @@ TreadBridge/
 
 ## Changelog
 
+### 1.1.1
+- **Changed:** landscape LIVE page. The *Incline %* box is now as big as *Pace* and *Distance* and sits below them in the right column; the *Time* box is wider instead. The *Treadmill* and *Watch* boxes at the top are equally wide, and the right one ends flush with the right column.
+- **Changed:** landscape DEVICE page. *SCAN*, *DISC.*, *UP* and *DOWN* are equally wide with equal gaps and end flush with the right edge of the Bluetooth name list. In portrait the two top buttons now end flush with the list as well.
+- **Changed:** README screenshots regenerated with `tools/display-preview/make_images.py`.
+
 ### 1.1.0
 - **Fixed:** automatic reconnect. After the treadmill or the ESP32 was restarted, the display showed “searching” but never connected; you had to press *Connect* manually. Cause: in NimBLE-Arduino 2.x, stopping a scan does not call the scan-end callback, so the “connect now” step never ran and the scan state stayed stuck. The BLE task now handles the hit itself and keeps the scan state in sync with the real scanner.
 - **New:** web flasher with settings page (GitHub Pages) and serial provisioning commands.
