@@ -1,0 +1,68 @@
+# Builds the firmware with PlatformIO and publishes the web flasher (docs/) on GitHub Pages.
+# One-time setup in the repository: Settings -> Pages -> Source: "GitHub Actions".
+name: Build firmware and deploy web flasher
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Use the example configuration
+        # include/config.h is git-ignored (it holds WLAN credentials); the web flasher
+        # writes the user's settings to the device afterwards.
+        run: cp include/config.example.h include/config.h
+
+      - name: Build
+        run: pio run
+
+      - name: Collect firmware files for the web flasher
+        run: |
+          mkdir -p docs/firmware
+          B=.pio/build/esp32c6
+          cp "$B/bootloader.bin" "$B/partitions.bin" "$B/firmware.bin" docs/firmware/
+          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin | head -n 1)
+          cp "$BOOT_APP0" docs/firmware/boot_app0.bin
+          VERSION=$(grep -oP '#define FW_VERSION "\K[^"]+' src/defaults.h)
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" docs/manifest.json
+          ls -l docs/firmware
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

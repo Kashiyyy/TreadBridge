@@ -1,9 +1,9 @@
 #pragma once
-// Weboberflaeche im Stil des Displays (dunkel, Karten, Leiste unten), Deutsch/English.
-// Seiten: Live, Geraete (Laufband anmelden), Foot Pod, Log, Einstellungen.
-const char PAGE[] PROGMEM = R"rawliteral(<!doctype html><html lang="de"><head><meta charset="utf-8">
+// Web interface in the style of the display (dark, cards, bar at the bottom), German/English.
+// Pages: Live, Devices (register the treadmill), Foot pod, Log, Settings.
+const char PAGE[] PROGMEM = R"rawliteral(<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Laufband-Bridge</title>
+<title>TreadBridge</title>
 <style>
 :root{--bg:#080A0E;--card:#1C2028;--card2:#252A34;--fg:#EBEEF2;--dim:#828A96;--acc:#00C88C;--ok:#3CD26E;--warn:#F0BE28;--bad:#DC4646;--off:#3C4048;--line:#323842}
 *{box-sizing:border-box}
@@ -60,7 +60,7 @@ nav button{flex:1;background:none;color:var(--fg);border-radius:0;padding:14px 2
 nav button.on{background:var(--acc);color:#04130d}
 #toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:var(--card2);color:var(--fg);padding:8px 14px;border-radius:10px;font-size:.85rem;display:none;max-width:90%}
 </style></head><body>
-<h1><span>Laufband-Bridge</span><small id="top">...</small></h1>
+<h1><span>TreadBridge</span><small id="top">...</small></h1>
 <div id="offline" hidden data-i="offline">Keine Antwort vom ESP32 – versuche es weiter ...</div>
 
 <div id="p-live" class="page on">
@@ -181,7 +181,7 @@ en:{offline:'No response from the ESP32 – still trying ...',ind_tm:'Treadmill'
 };
 const $=id=>document.getElementById(id);
 const mk=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e};
-let LANG='de',S=null,tab='live',busy=false,logNext=0,paused=false,devKey='',setLoaded=false,setProfile=1;
+let LANG='en',S=null,tab='live',busy=false,logNext=0,paused=false,devKey='',setLoaded=false,setProfile=1;
 const t=(k,...a)=>{let s=(I[LANG]&&I[LANG][k]!==undefined)?I[LANG][k]:(I.de[k]!==undefined?I.de[k]:k);a.forEach((v,i)=>{s=s.replace('{'+i+'}',v)});return s};
 function applyLang(){
  document.documentElement.lang=LANG;
@@ -189,7 +189,7 @@ function applyLang(){
  $('lgPause').textContent=paused?t('resume'):t('pause');
  devKey='';setLoaded=false;
  if(tab==='set')loadSettings();
- if(S){S.lang=(LANG==='en')?1:0;render(S)}   // veraltete Zustandsdaten nicht in die alte Sprache zurueckschalten
+ if(S){S.lang=(LANG==='en')?1:0;render(S)}   // do not switch stale state data back to the old language
 }
 
 async function get(p,opt){const c=new AbortController();const tm=setTimeout(()=>c.abort(),6000);
@@ -233,7 +233,7 @@ function render(s){
  $('ti').textContent=fresh?fmtT(L.time):'--:--:--';
  $('in').textContent=fresh&&L.incl>-900?L.incl.toFixed(1):'--';
  $('msg').textContent=s.msg?(t('last_msg')+s.msg):'';
- // Geraete
+ // Devices
  $('tName').textContent=s.t.conn?(s.t.name||t('st_conn')):(s.t.savedName||t('not_reg'));
  $('tSub').textContent=s.t.conn?t('st_conn'):(s.t.savedName?(s.auto?t('saved_auto_on'):t('saved_auto_off')):'');
  $('tDisc').disabled=!s.t.conn;$('tForget').disabled=!s.t.savedName&&!s.t.conn;
@@ -308,7 +308,7 @@ $('lgCopy').onclick=()=>{
   try{document.execCommand('copy');ok()}catch(e){toast(t('copy_fail'))}x.remove()}
 };
 
-// ---- Geraete / Foot Pod ----
+// ---- Devices / Foot pod ----
 $('scan').onclick=()=>act('/api/scan');
 $('tDisc').onclick=()=>act('/api/disconnect');
 $('tForget').onclick=()=>{if(confirm(t('confirm_forget')))act('/api/forget')};
@@ -322,7 +322,7 @@ $('simP').onclick=()=>{const v=S?S.fp.sim:-1;act('/api/sim?speed='+(v<0?6:Math.m
 $('simOff').onclick=()=>act('/api/sim?speed=-1');
 $('fpReset').onclick=()=>act('/api/fpreset');
 
-// ---- Einstellungen ----
+// ---- Settings ----
 function fpFullName(){
  const base=$('fpbase').value.trim();
  const pn=(setProfile===2?$('pn2'):$('pn1')).value.trim();
@@ -354,7 +354,7 @@ async function saveSettings(restart){
   const r=await get('/api/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()});
   const j=await r.json();
   if(!j.ok){$('setMsg').textContent=t('not_saved',j.error);return}
-  if(String($('lang').value)!==(LANG==='en'?'1':'0')){LANG=$('lang').value==='1'?'en':'de';applyLang()}   // Sprache sofort umschalten
+  if(String($('lang').value)!==(LANG==='en'?'1':'0')){LANG=$('lang').value==='1'?'en':'de';applyLang()}   // switch the language immediately
   setLoaded=false;await loadSettings();
   if(restart){await doRestart();return}
   $('setMsg').textContent=j.restart?t('saved_restart'):t('saved_ok');

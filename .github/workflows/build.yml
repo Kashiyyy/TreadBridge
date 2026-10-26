@@ -1,0 +1,135 @@
+# Builds the firmware on every push / merge to main, publishes it as a GitHub Release
+# (version number + date in the name) and deploys the web flasher to GitHub Pages.
+#
+# One-time setup in the repository:
+#   Settings -> Pages   -> Source: "GitHub Actions"
+#   Settings -> Actions -> General -> Workflow permissions: "Read and write permissions"
+#     (or keep the default and rely on the permissions block below, which already requests contents: write)
+name: Build firmware, release and deploy web flasher
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "tools/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+permissions:
+  contents: write      # create the release
+  pages: write         # deploy the web flasher
+  id-token: write
+
+concurrency:
+  group: build-main
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Version, date and build number
+        id: meta
+        run: |
+          VERSION=$(grep -oP '#define FW_VERSION "\K[^"]+' src/defaults.h)
+          DATE=$(date -u +%F)                       # e.g. 2026-10-26
+          BUILD=${{ github.run_number }}
+          TAG="v${VERSION}-${DATE//-/}-${BUILD}"    # e.g. v1.1.0-20261026-42
+          NAME="TreadBridge-v${VERSION}-${DATE}"    # e.g. TreadBridge-v1.1.0-2026-10-26
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE"       >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD"     >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "name=$NAME"       >> "$GITHUB_OUTPUT"
+          # compiled into the firmware (shown on USB / in the web flasher)
+          cat > include/build_info.h <<EOT
+          #pragma once
+          #define FW_BUILD_DATE "$DATE"
+          #define FW_BUILD_NUMBER "$BUILD"
+          EOT
+          sed -i 's/^ *//' include/build_info.h
+
+      - name: Use the example configuration
+        # include/config.h is git-ignored (it holds WLAN credentials); the web flasher
+        # writes the user's settings to the device afterwards.
+        run: cp include/config.example.h include/config.h
+
+      - name: Build
+        run: pio run
+
+      - name: Collect firmware files
+        run: |
+          mkdir -p dist docs/firmware
+          B=.pio/build/esp32c6
+          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin | head -n 1)
+          ESPTOOL=$(find ~/.platformio/packages/tool-esptoolpy -name esptool.py | head -n 1)
+
+          # files for the web flasher (GitHub Pages)
+          cp "$B/bootloader.bin" "$B/partitions.bin" "$B/firmware.bin" docs/firmware/
+          cp "$BOOT_APP0" docs/firmware/boot_app0.bin
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${{ steps.meta.outputs.version }} (${{ steps.meta.outputs.date }})\"/" docs/manifest.json
+
+          # one complete image for the release (flash it at address 0x0, e.g. with esptool or the web flasher)
+          python "$ESPTOOL" --chip esp32c6 merge_bin -o "dist/${{ steps.meta.outputs.name }}-complete.bin" \
+            0x0 "$B/bootloader.bin" 0x8000 "$B/partitions.bin" 0xe000 "$BOOT_APP0" 0x10000 "$B/firmware.bin"
+          # app-only image (for updates over an existing installation)
+          cp "$B/firmware.bin" "dist/${{ steps.meta.outputs.name }}-app-only.bin"
+          ls -l dist docs/firmware
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/*.bin
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          gh release create "$TAG" dist/*.bin \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "TreadBridge ${TAG#v}" \
+            --generate-notes \
+            --notes "Firmware build ${{ github.run_number }} from commit ${{ github.sha }}.
+          **Install:** use the [web flasher](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/) (easiest) or write \`*-complete.bin\` to address \`0x0\` with esptool. \`*-app-only.bin\` contains only the application (offset \`0x10000\`)."
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
